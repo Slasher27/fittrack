@@ -47,6 +47,7 @@ fittrack/
 ├── apple-touch-icon.png
 ├── favicon.png
 ├── README.md           ← End-user deploy/install instructions.
+├── UI-UX-PLAN.md       ← Active UI/UX enhancement plan + session log (see §10).
 └── CLAUDE.md           ← This file.
 ```
 
@@ -265,6 +266,11 @@ After any deploy that changed cached files, remember §6 (bump `CACHE`).
 ---
 
 ## 10. Roadmap / good next enhancements
+
+> **Active UI/UX work is tracked in [`UI-UX-PLAN.md`](UI-UX-PLAN.md).** Read it
+> at the start of a session and update it (tick items, append to the session
+> log) at the end of each session. The list below is the longer-term product
+> roadmap.
 
 Ideas discussed with the user, roughly in priority order:
 
