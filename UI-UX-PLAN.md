@@ -93,6 +93,34 @@ No data-model changes were required.
 
 ---
 
+## Shipped outside the original batches
+
+### Plan reference + AI assistant — [x] DONE (2026-07-28)
+
+The original coaching document (`duwayne-fitness-plan.html`, provided by the
+user) is now dissected into the app as a **📖 Plan** view (header button next
+to ⚙️; view id `#view-plan`, not in the bottom nav):
+
+- 8 collapsible sections (`PLAN_SECTIONS`, native `<details>` accordions):
+  strategy, numbers/macros + how they were calculated, nutrition rules +
+  swap list + supplements, full A/B/C program tables (rest times, notes,
+  double progression, deload), mobility/cardio, lifestyle, tracking &
+  adjustment rules, evidence + disclaimer.
+- **Ask box** at the top:
+  - With an Anthropic API key (Settings → "AI assistant key", stored as
+    `SET.aiKey` on-device only) and online: raw-fetch call to the Messages
+    API (`claude-opus-5`, low effort, plan embedded in a cached system
+    prompt, browser CORS opt-in header). Handles refusal stop_reason and
+    API errors; renders lightly-formatted answers.
+  - Without a key or offline: **local keyword search** that opens the most
+    relevant plan sections — the offline-first principle holds; the AI is
+    a graceful, optional online enhancement (per CLAUDE.md roadmap #5
+    philosophy).
+- Tested headless with a mocked API (16 checks: sections render/toggle,
+  offline fallback, no request without key, request shape/model/headers/
+  caching verified, answer rendering, key persistence).
+- SW cache bumped to `fittrack-v4`.
+
 ## Batch 2 — feel & polish (Tier 2)
 
 ### 2.1 Workout logger upgrades — [ ] not started
@@ -135,4 +163,5 @@ No data-model changes were required.
 | Date | Session summary |
 |---|---|
 | 2026-07-28 | Scanned codebase, agreed enhancement plan (this document). Batch 1 scope confirmed: Today's-plan card, recent foods + repeat-yesterday, dark mode, motion pass. No code changes yet. |
+| 2026-07-28 | **Plan reference + AI assistant shipped** (user request, outside original batches — see "Shipped outside the original batches"). Original coaching doc dissected into a 📖 Plan view (8 accordion sections) with an Ask box: Claude API answers when a key is set (Settings) + online, local plan search otherwise. SW cache → `fittrack-v4`. 16 mocked-API headless checks passing. Real-API call still to be verified by the user with their own key. |
 | 2026-07-28 | **Batch 1 shipped.** Today's-plan card (weekday meals + Day A/B/C chip, respects date nav), ⭐ Frequent foods group, repeat-yesterday, full dark mode (Auto/Light/Dark in Settings, new CSS vars for all previously hardcoded colors, theme-aware canvas chart), motion pass (view/modal/ring animations, kcal count-up, reduced-motion support, vibrate on save). SW cache → `fittrack-v3`. Smoke tested headless (18/18 passing, no console errors). Next: Batch 2 (workout logger upgrades, weight-chart interactivity); on-device PWA status-bar check still pending. |

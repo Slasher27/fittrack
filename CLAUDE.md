@@ -85,9 +85,20 @@ reset.
 ## 4. Architecture of `index.html`
 
 ### 4.1 Views & navigation
-Five `<div class="view">` containers, one per tab, toggled by CSS `.hidden`:
-`#view-today`, `#view-food`, `#view-body`, `#view-photos`, `#view-train`.
-A fixed bottom `.nav` with `data-nav="<view>"` buttons drives it.
+Six `<div class="view">` containers toggled by CSS `.hidden`: five tabs
+(`#view-today`, `#view-food`, `#view-body`, `#view-photos`, `#view-train`)
+driven by the fixed bottom `.nav` (`data-nav="<view>"` buttons), plus
+`#view-plan` (the 📖 Plan/help screen, opened via the header `#helpBtn`, not
+in the nav).
+
+**`#view-plan` / AI assistant:** the user's original coaching document lives
+in-app as `PLAN_SECTIONS` (8 `<details>` accordions). The Ask box calls the
+Anthropic Messages API directly from the browser (raw `fetch`, model
+`claude-opus-5`, plan text as a cached system prompt) **only** when the user
+has stored an API key (`SET.aiKey`, Settings) and is online; otherwise it
+falls back to a local keyword search over the sections. This is the app's one
+optional runtime network call — keep the offline fallback working, and never
+send any user data beyond the typed question.
 
 - **`go(view)`** — the router. Hides all views, shows the target, updates the
   active nav button, scrolls to top, and calls that view's render function.
