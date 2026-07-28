@@ -121,6 +121,56 @@ to ⚙️; view id `#view-plan`, not in the bottom nav):
   caching verified, answer rendering, key persistence).
 - SW cache bumped to `fittrack-v4`.
 
+### Mobile responsiveness & accessibility audit — [x] DONE (2026-07-28)
+
+Requested by the user ("professional app-like feel, correct mobile
+responsiveness, correct accessibility for mobile"). Verified by an automated
+27-check audit (headless Edge at 320px and 390px): zero horizontal overflow on
+every view at both widths, all buttons named, no small tap targets, keyboard
+flows working, no console errors.
+
+**Fixed in this audit:**
+
+- **Pinch-zoom unblocked** — removed `maximum-scale=1.0, user-scalable=no`
+  from the viewport meta (WCAG 1.4.4 failure; inputs are already 16px so iOS
+  won't auto-zoom on focus).
+- **Modals are real dialogs** — `role="dialog"`, `aria-modal`, focus moves
+  into the sheet on open, **Escape closes**, backdrop click still closes,
+  and the background page scroll is locked while a sheet is open.
+- **Keyboard access for clickable rows** — food/meal rows, photo cells, and
+  workout-history cards get `role="button"` + `tabindex="0"`, activated by
+  Enter/Space via a global handler; `:focus-visible` outline added.
+- **Screen-reader labels** — aria-labels on every icon-only control (date
+  ‹ ›, all delete/close ✕s, set weight/reps inputs); photos get alt text;
+  the weight chart canvas gets `role="img"` + label; the nav is a labelled
+  `navigation` landmark with `aria-current="page"`; toasts announce via
+  `role="status"` / `aria-live="polite"`.
+- **Contrast** — light-mode `--muted` darkened `#69766f` → `#5c6b64`
+  (≥4.5:1 on bg/card for the small secondary text it's used on).
+- **Tap targets** — `.pillbtn` grown to ≥30px height; audit confirms no
+  visible interactive element under 28px.
+- **Discoverability** — pointer cursor + hover highlight + `›` chevron on all
+  clickable rows (the user reported rows gave no indication of being tappable).
+- **Meal editing** (same session): ✎ on every meal row and inside the meal
+  modal. Custom meals edit in place; plan meals convert to a custom copy in
+  the same day/slot (survives `MEAL_SEED_VERSION` reseeds by design).
+- **Bug fix** — delete ✕ on custom foods/meals used to open the log modal
+  instead of deleting (row-level `data-logfood`/`data-logmeal` matched before
+  the inner button in the delegated handler). Handler order now checks inner
+  buttons first.
+
+**Backlog (found, not yet fixed — future sessions):**
+
+- [ ] Associate `label.fl` with inputs (`for`/`id`) across modals — labels
+      are currently proximity-only for screen readers.
+- [ ] Full focus **trap** in modals (Tab can still reach background content;
+      Escape/backdrop already work).
+- [ ] `.xs` text (11.5px) is small for mobile; consider a global bump to
+      ~12.5px minimum.
+- [ ] `forced-colors` / high-contrast-mode pass.
+- [ ] On-device iOS/Android standalone check (safe areas, status bar) —
+      still outstanding from Batch 1.
+
 ## Batch 2 — feel & polish (Tier 2)
 
 ### 2.1 Workout logger upgrades — [ ] not started
@@ -163,5 +213,7 @@ to ⚙️; view id `#view-plan`, not in the bottom nav):
 | Date | Session summary |
 |---|---|
 | 2026-07-28 | Scanned codebase, agreed enhancement plan (this document). Batch 1 scope confirmed: Today's-plan card, recent foods + repeat-yesterday, dark mode, motion pass. No code changes yet. |
+| 2026-07-28 | **Meal editing + mobile/a11y audit.** ✎ edit for all meals (plan meals convert to custom copies in-slot), hover/cursor/chevron affordance on clickable rows, fixed latent delete-✕-opens-modal bug. Full audit applied: pinch-zoom re-enabled, dialog semantics + Escape + focus + scroll-lock on modals, keyboard-activatable rows, aria labels/landmarks/alt text/live toasts, contrast + tap-target bumps. 27 automated checks passing at 320px & 390px. Backlog captured under "Mobile responsiveness & accessibility audit". Still within the pending `fittrack-v4` bump. |
+| 2026-07-28 | **Desktop modal polish** (user-reported on the deployed Netlify site): thin themed scrollbar on `.modal` (light+dark, rounded thumb, track inset from the rounded corners), desktop modals narrowed to 520px max-width / 86vh, number-input spinners hidden. Also security fix: backup export strips `aiKey`; restore preserves the on-device key. Covered by the pending `fittrack-v4` bump. |
 | 2026-07-28 | **Plan reference + AI assistant shipped** (user request, outside original batches — see "Shipped outside the original batches"). Original coaching doc dissected into a 📖 Plan view (8 accordion sections) with an Ask box: Claude API answers when a key is set (Settings) + online, local plan search otherwise. SW cache → `fittrack-v4`. 16 mocked-API headless checks passing. Real-API call still to be verified by the user with their own key. |
 | 2026-07-28 | **Batch 1 shipped.** Today's-plan card (weekday meals + Day A/B/C chip, respects date nav), ⭐ Frequent foods group, repeat-yesterday, full dark mode (Auto/Light/Dark in Settings, new CSS vars for all previously hardcoded colors, theme-aware canvas chart), motion pass (view/modal/ring animations, kcal count-up, reduced-motion support, vibrate on save). SW cache → `fittrack-v3`. Smoke tested headless (18/18 passing, no console errors). Next: Batch 2 (workout logger upgrades, weight-chart interactivity); on-device PWA status-bar check still pending. |

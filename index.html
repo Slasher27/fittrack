@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#155a49">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -13,7 +13,7 @@
 <title>FitTrack</title>
 <style>
   :root{
-    --bg:#f4f6f5;--card:#fff;--ink:#182420;--muted:#69766f;--line:#e6eae7;
+    --bg:#f4f6f5;--card:#fff;--ink:#182420;--muted:#5c6b64;--line:#e6eae7;
     --brand:#1f7a63;--brand-d:#155a49;--brand-soft:#e6f2ee;
     --p:#1f7a63;--c:#c0743b;--f:#3a6ea5;
     --danger:#c0392b;--good:#2e7d4f;
@@ -96,7 +96,9 @@
   .entry .n{font-size:14px;font-weight:600}
   .entry .s{font-size:11.5px;color:var(--muted)}
   .entry .k{font-size:13px;font-weight:700;text-align:right;white-space:nowrap}
-  .pillbtn{border:none;background:var(--soft);border-radius:8px;padding:5px 9px;font-size:12px;font-weight:700;color:var(--muted)}
+  .pillbtn{border:none;background:var(--soft);border-radius:8px;padding:7px 10px;min-height:30px;font-size:12px;font-weight:700;color:var(--muted)}
+  :focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+  .modal:focus{outline:none}
   /* inputs */
   label.fl{display:block;font-size:12.5px;font-weight:700;color:var(--muted);margin:12px 0 5px;text-transform:uppercase;letter-spacing:.04em}
   input,select,textarea{width:100%;font-family:inherit;font-size:16px;padding:11px 12px;border:1px solid var(--line);border-radius:11px;background:var(--input-bg);color:var(--ink)}
@@ -109,8 +111,10 @@
   .seg{display:flex;background:var(--seg-bg);border-radius:12px;padding:4px;margin-bottom:14px}
   .seg button{flex:1;border:none;background:none;padding:9px;border-radius:9px;font-size:13.5px;font-weight:700;color:var(--muted)}
   .seg button.on{background:var(--seg-on);color:var(--brand);box-shadow:var(--shadow)}
-  .foodrow{display:flex;justify-content:space-between;align-items:center;padding:11px 4px;border-bottom:1px solid var(--line)}
+  .foodrow{display:flex;justify-content:space-between;align-items:center;padding:11px 4px;border-bottom:1px solid var(--line);cursor:pointer;transition:background .15s;border-radius:8px}
   .foodrow:active{background:var(--brand-soft)}
+  @media(hover:hover){.foodrow:hover{background:var(--brand-soft)}.foodrow:hover .chev{color:var(--brand);opacity:1}}
+  .chev{color:var(--muted);opacity:.55;font-size:17px;font-weight:700;flex:none;padding:0 2px}
   .foodrow .fn{font-size:14.5px;font-weight:600}
   .foodrow .fs{font-size:11.5px;color:var(--muted)}
   .foodrow .fk{font-size:12.5px;color:var(--muted);text-align:right;white-space:nowrap}
@@ -121,7 +125,14 @@
   .modal .mh{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
   .modal .mh h3{font-size:18px;font-weight:800;margin:0}
   .modal .x{background:var(--soft);border:none;width:34px;height:34px;border-radius:10px;font-size:17px;color:var(--muted)}
-  @media(min-width:641px){.modal-bg{align-items:center}.modal{border-radius:20px;margin:0 16px}}
+  .modal{scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+  .modal::-webkit-scrollbar{width:7px}
+  .modal::-webkit-scrollbar-track{background:transparent;margin:18px 0}
+  .modal::-webkit-scrollbar-thumb{background:var(--line);border-radius:99px}
+  .modal::-webkit-scrollbar-thumb:hover{background:var(--muted)}
+  input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+  input[type=number]{-moz-appearance:textfield}
+  @media(min-width:641px){.modal-bg{align-items:center}.modal{border-radius:20px;margin:0 16px;max-width:520px;max-height:86vh}}
   /* photos */
   .pgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
   .pcell{position:relative;aspect-ratio:3/4;border-radius:12px;overflow:hidden;background:var(--line);border:1px solid var(--line)}
@@ -200,9 +211,9 @@
 <!-- TODAY -->
 <div class="view" id="view-today">
   <div class="datenav">
-    <button id="prevDay">‹</button>
+    <button id="prevDay" aria-label="Previous day">‹</button>
     <div class="d" id="dayLabel">Today</div>
-    <button id="nextDay">›</button>
+    <button id="nextDay" aria-label="Next day">›</button>
   </div>
 
   <div class="card">
@@ -258,7 +269,7 @@
 <div class="view hidden" id="view-body">
   <h2 class="vt">Measurements</h2>
   <div class="card" id="bodyStats"></div>
-  <div class="card"><canvas id="weightChart" width="600" height="240"></canvas><div class="center xs muted" style="margin-top:6px">Bodyweight trend</div></div>
+  <div class="card"><canvas id="weightChart" width="600" height="240" role="img" aria-label="Bodyweight trend line chart with goal line"></canvas><div class="center xs muted" style="margin-top:6px">Bodyweight trend</div></div>
   <button class="btn" id="addMeasureBtn" style="margin-bottom:14px">+ Add measurement</button>
   <div id="measureList"></div>
 </div>
@@ -299,7 +310,7 @@
 </div>
 
 <!-- NAV -->
-<div class="nav">
+<div class="nav" role="navigation" aria-label="Main">
   <button data-nav="today" class="on"><span class="ni">🏠</span>Today</button>
   <button data-nav="food"><span class="ni">🍽️</span>Food</button>
   <button data-nav="body"><span class="ni">📏</span>Body</button>
@@ -308,7 +319,7 @@
 </div>
 
 <div id="modalRoot"></div>
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script>
 /* ============================ FitTrack app ============================ */
@@ -747,7 +758,7 @@ async function renderToday(){
   let any=false;
   for(const slot of order){const es=grouped[slot];if(!es||!es.length)continue;any=true;let sk=es.reduce((n,e)=>n+e.kcal,0);
     html+=`<div class="meal-h"><span>${labels[slot]}</span><span>${rnd(sk)} kcal</span></div>`;
-    es.forEach(e=>{html+=`<div class="entry"><div><div class="n">${esc(e.name)}</div><div class="s">${(+e.servings).toString().replace(/\.0$/,'')} × ${esc(e.serving||'')} · ${rnd(e.protein)}P ${rnd(e.carbs)}C ${rnd(e.fat)}F</div></div><div class="row" style="gap:8px"><div class="k">${rnd(e.kcal)}</div><button class="pillbtn" data-dellog="${e.id}">✕</button></div></div>`;});
+    es.forEach(e=>{html+=`<div class="entry"><div><div class="n">${esc(e.name)}</div><div class="s">${(+e.servings).toString().replace(/\.0$/,'')} × ${esc(e.serving||'')} · ${rnd(e.protein)}P ${rnd(e.carbs)}C ${rnd(e.fat)}F</div></div><div class="row" style="gap:8px"><div class="k">${rnd(e.kcal)}</div><button class="pillbtn" data-dellog="${e.id}" aria-label="Remove logged item">✕</button></div></div>`;});
   }
   $('#todayFood').innerHTML=any?`<div class="card">${html}</div>`:`<div class="empty"><span class="ic">🍽️</span>No food logged yet.<br>Tap “Log food” or “Log meal” above.<br><button class="btn sec sm" data-repeatday style="margin-top:12px">↻ Repeat yesterday’s log</button></div>`;
 
@@ -782,7 +793,7 @@ async function renderFood(){
     const filt=meals.filter(m=>(m.name+' '+(m.day?DAY_FULL[m.day]:'')+' '+(m.slot||'')).toLowerCase().includes(q));
     if(!filt.length){root.innerHTML=`<div class="empty"><span class="ic">🍱</span>No meals found. Tap “Build a meal” to add your own.</div>`;return;}
     const mealRow=async m=>{const t=await mealMacros(m,fmap);
-      return `<div class="foodrow" data-logmeal="${m.id}"><div><div class="fn">${m.slot?`<span class="badge" style="font-size:10px;margin-right:6px">${esc(m.slot)}</span>`:''}${esc(m.name)}</div><div class="fs">${m.items.length} items · ${rnd(t.protein)}P ${rnd(t.carbs)}C ${rnd(t.fat)}F</div></div><div class="row" style="gap:8px"><div class="fk">${rnd(t.kcal)}<br>kcal</div>${m.custom?`<button class="pillbtn" data-delmeal="${m.id}">✕</button>`:''}</div></div>`;};
+      return `<div class="foodrow" role="button" tabindex="0" data-logmeal="${m.id}"><div><div class="fn">${m.slot?`<span class="badge" style="font-size:10px;margin-right:6px">${esc(m.slot)}</span>`:''}${esc(m.name)}</div><div class="fs">${m.items.length} items · ${rnd(t.protein)}P ${rnd(t.carbs)}C ${rnd(t.fat)}F</div></div><div class="row" style="gap:7px"><div class="fk">${rnd(t.kcal)}<br>kcal</div><button class="pillbtn" data-editmeal="${m.id}" title="Edit meal">✎</button>${m.custom?`<button class="pillbtn" data-delmeal="${m.id}" title="Delete meal">✕</button>`:''}<span class="chev">›</span></div></div>`;};
     const plan=filt.filter(m=>m.day).sort((a,b)=>(DAY_ORDER.indexOf(a.day)-DAY_ORDER.indexOf(b.day))||((SLOT_ORDER[a.slot]??9)-(SLOT_ORDER[b.slot]??9)));
     const custom=filt.filter(m=>!m.day);
     let h='';let curDay='';
@@ -792,7 +803,7 @@ async function renderFood(){
   }
   let foods=await idbGetAll('foods');
   if(foodSeg==='mine')foods=foods.filter(f=>f.custom);
-  const foodRow=f=>`<div class="foodrow" data-logfood="${f.id}"><div><div class="fn">${esc(f.name)}</div><div class="fs">${esc(f.serving)} · ${rnd(f.protein)}P ${rnd(f.carbs)}C ${rnd(f.fat)}F</div></div><div class="row" style="gap:8px"><div class="fk">${rnd(f.kcal)}<br>kcal</div>${f.custom?`<button class="pillbtn" data-delfood="${f.id}">✕</button>`:''}</div></div>`;
+  const foodRow=f=>`<div class="foodrow" role="button" tabindex="0" data-logfood="${f.id}"><div><div class="fn">${esc(f.name)}</div><div class="fs">${esc(f.serving)} · ${rnd(f.protein)}P ${rnd(f.carbs)}C ${rnd(f.fat)}F</div></div><div class="row" style="gap:7px"><div class="fk">${rnd(f.kcal)}<br>kcal</div>${f.custom?`<button class="pillbtn" data-delfood="${f.id}" title="Delete food">✕</button>`:''}<span class="chev">›</span></div></div>`;
   // frequent foods (last 14 days of the log), library segment only, hidden while searching
   let recent='';
   if(foodSeg==='library'&&!q){
@@ -813,9 +824,14 @@ async function renderFood(){
 }
 
 /* ---------- Log food modal ---------- */
-function openModal(html){const r=$('#modalRoot');r.innerHTML=`<div class="modal-bg"><div class="modal">${html}</div></div>`;
-  r.querySelector('.modal-bg').addEventListener('click',e=>{if(e.target.classList.contains('modal-bg'))closeModal();});}
-function closeModal(){$('#modalRoot').innerHTML='';}
+function openModal(html){const r=$('#modalRoot');
+  r.innerHTML=`<div class="modal-bg"><div class="modal" role="dialog" aria-modal="true" tabindex="-1">${html}</div></div>`;
+  r.querySelector('.modal-bg').addEventListener('click',e=>{if(e.target.classList.contains('modal-bg'))closeModal();});
+  r.querySelectorAll('.x').forEach(b=>b.setAttribute('aria-label','Close'));
+  document.body.style.overflow='hidden'; // lock background scroll while the sheet is open
+  const m=r.querySelector('.modal');setTimeout(()=>m&&m.focus(),60);
+}
+function closeModal(){$('#modalRoot').innerHTML='';document.body.style.overflow='';}
 
 async function logFoodModal(foodId){
   const f=await idbGet('foods',foodId);if(!f)return;
@@ -853,7 +869,7 @@ async function logMealModal(mealId){
     return `<div class="entry"><div><div class="n">${esc(f.name)}</div><div class="s">${qty} × ${esc(f.serving)}${grams}</div></div><div class="k">${rnd(m.kcal)}<div class="xs muted" style="font-weight:600">${rnd(m.protein)}P ${rnd(m.carbs)}C ${rnd(m.fat)}F</div></div></div>`;
   }).join('');
   const slotSel=meal.slot?SLOT_KEY[meal.slot]:'lunch';
-  openModal(`<div class="mh"><h3>${esc(meal.name)}</h3><button class="x" onclick="closeModal()">✕</button></div>
+  openModal(`<div class="mh"><h3>${esc(meal.name)}</h3><div class="row" style="gap:6px"><button class="pillbtn" id="mEdit" aria-label="Edit meal">✎ Edit</button><button class="x" onclick="closeModal()">✕</button></div></div>
     ${meal.day?`<div class="sm muted" style="margin:-2px 0 10px">${DAY_FULL[meal.day]} · ${esc(meal.slot)}</div>`:''}
     <div class="card" style="box-shadow:none;background:var(--brand-soft);border:none;margin-bottom:6px"><b style="font-size:16px">${rnd(t.kcal)} kcal</b> · ${rnd(t.protein)}P ${rnd(t.carbs)}C ${rnd(t.fat)}F</div>
     <div class="grp">Ingredients</div>
@@ -862,6 +878,7 @@ async function logMealModal(mealId){
     <select id="mSlot">${['breakfast','lunch','snack','dinner'].map(s=>`<option value="${s}"${s===slotSel?' selected':''}>${s[0].toUpperCase()+s.slice(1)}</option>`).join('')}</select>
     <label class="fl">Date</label><input id="mDate" type="date" value="${curDate}">
     <button class="btn" style="margin-top:16px" id="mSave">Add whole meal to log</button>`);
+  $('#mEdit').onclick=()=>{closeModal();buildMealModal(meal.id);};
   $('#mSave').onclick=async()=>{const date=$('#mDate').value,slot=$('#mSlot').value;
     for(const it of meal.items){const f=fmap[it.foodId];if(!f)continue;const m=scale(f,it.servings);
       await idbPut('log',{id:uid(),date,meal:slot,foodId:f.id,name:f.name,serving:f.serving,servings:it.servings,kcal:m.kcal,protein:m.protein,carbs:m.carbs,fat:m.fat,ts:Date.now()});}
@@ -883,23 +900,35 @@ function addFoodModal(){
     closeModal();toast('Food saved');foodSeg='mine';renderFood();};
 }
 
-async function buildMealModal(){
+async function buildMealModal(editId){
   const foods=await idbGetAll('foods');
-  openModal(`<div class="mh"><h3>Build a meal</h3><button class="x" onclick="closeModal()">✕</button></div>
-   <label class="fl">Meal name</label><input id="bmName" placeholder="e.g. My Monday lunch">
+  const meal=editId?await idbGet('meals',editId):null;
+  openModal(`<div class="mh"><h3>${meal?'Edit meal':'Build a meal'}</h3><button class="x" onclick="closeModal()">✕</button></div>
+   ${meal&&meal.day?`<div class="sm muted" style="margin:-2px 0 6px">${DAY_FULL[meal.day]} · ${esc(meal.slot)} — from your plan; your edited version replaces it and survives plan updates.</div>`:''}
+   <label class="fl">Meal name</label><input id="bmName" placeholder="e.g. My Monday lunch" value="${meal?esc(meal.name):''}">
    <label class="fl">Add items</label>
    <div class="row" style="gap:8px"><select id="bmFood" style="flex:2">${foods.map(f=>`<option value="${f.id}">${esc(f.name)} (${esc(f.serving)})</option>`).join('')}</select>
      <input id="bmServ" type="number" step="0.1" value="1" style="flex:1" inputmode="decimal">
      <button class="btn sm sec" id="bmAdd" style="flex:none">Add</button></div>
    <div id="bmItems" style="margin-top:10px"></div>
-   <button class="btn" style="margin-top:14px" id="bmSave">Save meal</button>`);
-  const items=[];const fmap=foodMap(foods);
-  const draw=()=>{$('#bmItems').innerHTML=items.length?items.map((it,i)=>{const f=fmap[it.foodId];return `<div class="entry"><div class="n">${(it.servings+'').replace(/\.0$/,'')}× ${esc(f.name)}</div><button class="pillbtn" data-rm="${i}">✕</button></div>`;}).join(''):'<p class="sm muted">No items yet.</p>';};
+   <button class="btn" style="margin-top:14px" id="bmSave">${meal?'Save changes':'Save meal'}</button>`);
+  const items=meal?meal.items.map(i=>({...i})):[];const fmap=foodMap(foods);
+  const draw=()=>{$('#bmItems').innerHTML=items.length?items.map((it,i)=>{const f=fmap[it.foodId];if(!f)return '';return `<div class="entry"><div class="n">${(it.servings+'').replace(/\.0$/,'')}× ${esc(f.name)}</div><button class="pillbtn" data-rm="${i}" aria-label="Remove item">✕</button></div>`;}).join(''):'<p class="sm muted">No items yet.</p>';};
   draw();
   $('#bmAdd').onclick=()=>{items.push({foodId:$('#bmFood').value,servings:parseFloat($('#bmServ').value)||1});draw();};
   $('#bmItems').onclick=e=>{const b=e.target.closest('[data-rm]');if(b){items.splice(+b.dataset.rm,1);draw();}};
   $('#bmSave').onclick=async()=>{const name=$('#bmName').value.trim();if(!name)return toast('Enter a name');if(!items.length)return toast('Add items');
-    await idbPut('meals',{id:uid(),name,items:items.slice(),custom:true});closeModal();toast('Meal saved');foodSeg='meals';renderFood();};
+    if(meal){
+      if(meal.custom)await idbPut('meals',{...meal,name,items:items.slice()});
+      else{ // plan meal: replace with a custom copy in the same day/slot so seed updates keep it
+        await idbDel('meals',meal.id);
+        await idbPut('meals',{id:uid(),day:meal.day,slot:meal.slot,name,items:items.slice(),custom:true});
+      }
+      closeModal();toast('Meal updated');
+    }else{
+      await idbPut('meals',{id:uid(),name,items:items.slice(),custom:true});closeModal();toast('Meal saved');
+    }
+    foodSeg='meals';renderFood();};
 }
 
 /* ============================ BODY ============================ */
@@ -923,7 +952,7 @@ async function renderBody(){
   $('#bodyStats').innerHTML=stat;
   drawWeightChart(withW.slice().reverse());
   // list
-  $('#measureList').innerHTML=list.length?list.map(m=>`<div class="card" style="padding:12px 14px"><div class="row between"><div><b>${niceDate(m.date)}</b> <span class="sm muted">${parseD(m.date).toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'})}</span></div><button class="pillbtn" data-delmeas="${m.id}">✕</button></div><div class="sm" style="margin-top:4px">${[m.weight!=null?`⚖️ ${m.weight} kg`:'',m.waist?`📏 waist ${m.waist} cm`:'',m.chest?`chest ${m.chest}`:'',m.arm?`arm ${m.arm}`:'',m.thigh?`thigh ${m.thigh}`:''].filter(Boolean).join(' · ')}</div>${m.notes?`<div class="sm muted" style="margin-top:3px">“${esc(m.notes)}”</div>`:''}</div>`).join(''):'';
+  $('#measureList').innerHTML=list.length?list.map(m=>`<div class="card" style="padding:12px 14px"><div class="row between"><div><b>${niceDate(m.date)}</b> <span class="sm muted">${parseD(m.date).toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'})}</span></div><button class="pillbtn" data-delmeas="${m.id}" aria-label="Delete measurement">✕</button></div><div class="sm" style="margin-top:4px">${[m.weight!=null?`⚖️ ${m.weight} kg`:'',m.waist?`📏 waist ${m.waist} cm`:'',m.chest?`chest ${m.chest}`:'',m.arm?`arm ${m.arm}`:'',m.thigh?`thigh ${m.thigh}`:''].filter(Boolean).join(' · ')}</div>${m.notes?`<div class="sm muted" style="margin-top:3px">“${esc(m.notes)}”</div>`:''}</div>`).join(''):'';
 }
 function drawWeightChart(data){
   const cv=$('#weightChart'),ctx=cv.getContext('2d');const W=cv.width=cv.clientWidth*2,H=cv.height=480;ctx.scale(1,1);
@@ -968,7 +997,7 @@ async function renderPhotos(){
   const grid=$('#photoGrid');
   if(!list.length){grid.innerHTML=`<div class="empty"><span class="ic">📷</span>No photos yet.</div>`;return;}
   grid.className='pgrid';
-  grid.innerHTML=list.map(p=>{const url=URL.createObjectURL(p.blob);return `<div class="pcell" data-photo="${p.id}"><img src="${url}"><span class="tag2">${esc(p.category||'')}</span><span class="cap">${niceDate(p.date)}</span></div>`;}).join('');
+  grid.innerHTML=list.map(p=>{const url=URL.createObjectURL(p.blob);return `<div class="pcell" role="button" tabindex="0" data-photo="${p.id}"><img src="${url}" alt="${esc(p.category||'Progress')} photo, ${niceDate(p.date)}"><span class="tag2">${esc(p.category||'')}</span><span class="cap">${niceDate(p.date)}</span></div>`;}).join('');
 }
 function addPhotoModal(){
   openModal(`<div class="mh"><h3>Add progress photo</h3><button class="x" onclick="closeModal()">✕</button></div>
@@ -987,7 +1016,7 @@ function compressImage(file){return new Promise(res=>{const img=new Image();img.
   const cv=document.createElement('canvas');cv.width=w;cv.height=h;cv.getContext('2d').drawImage(img,0,0,w,h);cv.toBlob(b=>res(b||file),'image/jpeg',0.82);};img.src=URL.createObjectURL(file);});}
 function viewPhotoModal(id){idbGet('photos',id).then(p=>{const url=URL.createObjectURL(p.blob);
   openModal(`<div class="mh"><h3>${esc(p.category)} · ${niceDate(p.date)}</h3><button class="x" onclick="closeModal()">✕</button></div>
-   <img src="${url}" style="width:100%;border-radius:14px">${p.note?`<p class="sm muted" style="margin-top:8px">“${esc(p.note)}”</p>`:''}
+   <img src="${url}" alt="${esc(p.category||'Progress')} photo, ${niceDate(p.date)}" style="width:100%;border-radius:14px">${p.note?`<p class="sm muted" style="margin-top:8px">“${esc(p.note)}”</p>`:''}
    <button class="btn danger" style="margin-top:12px" data-delphoto="${p.id}">Delete photo</button>`);});}
 
 /* ============================ TRAIN ============================ */
@@ -997,7 +1026,7 @@ function renderTrainStart(){
 async function renderWorkoutHistory(){
   const list=(await idbGetAll('workouts')).sort((a,b)=>a.date<b.date?1:(a.date>b.date?-1:b.ts-a.ts));
   $('#workoutHistory').innerHTML=list.length?list.map(w=>{const sets=w.exercises.reduce((n,e)=>n+e.sets.filter(s=>s.reps).length,0);const vol=w.exercises.reduce((v,e)=>v+e.sets.reduce((x,s)=>x+((+s.weight||0)*(+s.reps||0)),0),0);
-    return `<div class="card sessioncard" data-openwo="${w.id}"><div class="row between"><div><b>${esc(w.title.split('—')[0].trim())}</b><div class="sm muted">${niceDate(w.date)} · ${sets} sets · ${rnd(vol)} kg volume</div></div><span class="pillbtn">View ›</span></div></div>`;}).join(''):`<div class="empty"><span class="ic">🏋️</span>No sessions logged yet.</div>`;
+    return `<div class="card sessioncard" role="button" tabindex="0" data-openwo="${w.id}"><div class="row between"><div><b>${esc(w.title.split('—')[0].trim())}</b><div class="sm muted">${niceDate(w.date)} · ${sets} sets · ${rnd(vol)} kg volume</div></div><span class="pillbtn">View ›</span></div></div>`;}).join(''):`<div class="empty"><span class="ic">🏋️</span>No sessions logged yet.</div>`;
 }
 async function startSession(dayKey,existing){
   const prog=PROGRAM[dayKey];
@@ -1035,7 +1064,7 @@ function drawSession(session,lastMap){
       ex.sets=rows.map(r=>{const ins=r.querySelectorAll('input');return{weight:ins[0].value,reps:ins[1].value};});});
     await idbPut('workouts',session);closeModal();buzz();toast('Session saved 💪');curDate=session.date;go('train');renderToday();};
 }
-function setRow(ei,si,s){return `<div class="setrow"><span class="si">${si+1}</span><input type="number" inputmode="decimal" placeholder="0" value="${s.weight??''}"><input type="number" inputmode="numeric" placeholder="0" value="${s.reps??''}"><button class="del" data-delset>✕</button></div>`;}
+function setRow(ei,si,s){return `<div class="setrow"><span class="si">${si+1}</span><input type="number" inputmode="decimal" placeholder="0" aria-label="Set ${si+1} weight, kg" value="${s.weight??''}"><input type="number" inputmode="numeric" placeholder="0" aria-label="Set ${si+1} reps" value="${s.reps??''}"><button class="del" data-delset aria-label="Remove set ${si+1}">✕</button></div>`;}
 async function openWorkout(id){const w=await idbGet('workouts',id);const all=(await idbGetAll('workouts')).filter(x=>x.dayKey===w.dayKey&&x.date<w.date).sort((a,b)=>a.date<b.date?1:-1);const lastMap={};if(all[0])all[0].exercises.forEach(e=>lastMap[e.name]=e.sets);drawSession(w,lastMap);}
 
 /* ============================ SETTINGS ============================ */
@@ -1102,7 +1131,8 @@ function go(view){
   $$('.view').forEach(v=>v.classList.add('hidden'));
   const v=$('#view-'+view);v.classList.remove('hidden');
   v.classList.remove('enter');void v.offsetWidth;v.classList.add('enter');
-  $$('.nav button').forEach(b=>b.classList.toggle('on',b.dataset.nav===view));
+  $$('.nav button').forEach(b=>{const on=b.dataset.nav===view;b.classList.toggle('on',on);
+    if(on)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});
   window.scrollTo(0,0);
   if(view==='today')renderToday();
   if(view==='food')renderFood();
@@ -1118,10 +1148,12 @@ document.addEventListener('click',async e=>{
   const nav=t.closest('[data-nav]');if(nav){go(nav.dataset.nav);return;}
   const q=t.closest('[data-quick]');if(q){const k=q.dataset.quick;if(k==='food'){go('food');foodSeg='library';renderFood();}else if(k==='meal'){go('food');foodSeg='meals';renderFood();}else if(k==='weight')addMeasureModal();else if(k==='train')go('train');return;}
   const seg=t.closest('[data-fseg]');if(seg){foodSeg=seg.dataset.fseg;renderFood();return;}
+  // inner action buttons first — they live inside clickable [data-logfood]/[data-logmeal] rows
+  const df=t.closest('[data-delfood]');if(df){if(confirm('Delete this food?')){await idbDel('foods',df.dataset.delfood);renderFood();}return;}
+  const dm=t.closest('[data-delmeal]');if(dm){if(confirm('Delete this meal?')){await idbDel('meals',dm.dataset.delmeal);renderFood();}return;}
+  const em=t.closest('[data-editmeal]');if(em){buildMealModal(em.dataset.editmeal);return;}
   const lf=t.closest('[data-logfood]');if(lf){logFoodModal(lf.dataset.logfood);return;}
   const lm=t.closest('[data-logmeal]');if(lm){logMealModal(lm.dataset.logmeal);return;}
-  const df=t.closest('[data-delfood]');if(df){e.stopPropagation();if(confirm('Delete this food?')){await idbDel('foods',df.dataset.delfood);renderFood();}return;}
-  const dm=t.closest('[data-delmeal]');if(dm){e.stopPropagation();if(confirm('Delete this meal?')){await idbDel('meals',dm.dataset.delmeal);renderFood();}return;}
   const dl=t.closest('[data-dellog]');if(dl){await idbDel('log',dl.dataset.dellog);renderToday();return;}
   const rp=t.closest('[data-repeatday]');if(rp){const d=parseD(curDate);d.setDate(d.getDate()-1);const prevDay=dstr(d);
     const prev=await idbByDate('log',prevDay);
@@ -1143,6 +1175,11 @@ document.addEventListener('click',async e=>{
 });
 $('#foodSearch').addEventListener('input',()=>renderFood());
 $('#aiQ').addEventListener('keydown',e=>{if(e.key==='Enter')askPlan();});
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'&&$('#modalRoot').children.length){closeModal();return;}
+  // activate clickable rows (role="button" divs) with Enter/Space
+  if((e.key==='Enter'||e.key===' ')&&e.target instanceof Element&&e.target.matches('div[role="button"]')){e.preventDefault();e.target.click();}
+});
 $('#prevDay').onclick=()=>{const d=parseD(curDate);d.setDate(d.getDate()-1);curDate=dstr(d);renderToday();};
 $('#nextDay').onclick=()=>{const d=parseD(curDate);d.setDate(d.getDate()+1);curDate=dstr(d);renderToday();};
 window.closeModal=closeModal;
