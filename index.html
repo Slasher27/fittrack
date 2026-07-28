@@ -949,6 +949,36 @@ async function renderCoach(){
   }${fired.length>4?`<div class="xs muted center" style="margin-top:6px">+${fired.length-4} more after these are handled</div>`:''}</div>`:'';
 }
 
+/* ---------- Notifications (opt-in; local only — no push server) ---------- */
+function notifySupported(){return 'Notification' in window&&'serviceWorker' in navigator;}
+async function registerPeriodic(){ // Android/Chrome installed-PWA background nudges; silently unavailable elsewhere
+  try{
+    const reg=await navigator.serviceWorker.ready;
+    if(!('periodicSync' in reg))return;
+    const st=await navigator.permissions.query({name:'periodic-background-sync'}).catch(()=>null);
+    if(st&&st.state!=='granted')return;
+    await reg.periodicSync.register('fittrack-daily',{minInterval:12*60*60*1000});
+  }catch(e){}
+}
+async function notifyCoach(){ // on launch: one notification per day for warn-level insights
+  if(!SET.notify||!notifySupported()||Notification.permission!=='granted')return;
+  const today=todayStr();if(SET.lastNotify===today)return;
+  const s=await computeStats();
+  const dis=(await idbGet('kv','insightDismissals'))?.v||{};
+  const warns=[];
+  for(const r of INSIGHT_RULES){
+    if(r.sev!=='warn')continue;
+    let res;try{res=r.check(s);}catch(e){continue;}
+    if(!res)continue;
+    const d=dis[r.id];if(d&&(parseD(today)-parseD(d))/864e5<r.cd)continue;
+    warns.push(res.t);
+  }
+  if(!warns.length)return;
+  SET.lastNotify=today;await saveSettings();
+  const reg=await navigator.serviceWorker.ready;
+  reg.showNotification('🧠 FitTrack Coach',{body:warns.slice(0,3).join(' · '),tag:'fittrack-coach',icon:'./icon-192.png',badge:'./icon-192.png'});
+}
+
 /* ============================ TODAY ============================ */
 async function renderToday(){
   $('#dayLabel').textContent=niceDate(curDate);
@@ -1394,6 +1424,9 @@ function settingsModal(){
    <label class="fl">AI assistant key (optional)</label>
    <input id="stAI" type="password" placeholder="Anthropic API key (sk-ant-…)" value="${esc(SET.aiKey||'')}">
    <p class="xs muted" style="margin:6px 0 0">Stored only on this device. Powers “Ask” on the 📖 Plan screen; without it, Ask searches the plan offline.</p>
+   <label class="fl">Notifications</label>
+   <div class="row between"><span class="sm" id="ntStatus">…</span><button class="btn sec sm" id="ntBtn">Enable</button></div>
+   <p class="xs muted" style="margin:6px 0 0">Coach alerts when you open the app, plus training-day &amp; log reminders on Android (installed app). On iPhone, alerts only appear while the app is open — Apple requires a push server for background delivery, which FitTrack deliberately doesn't use.</p>
    <button class="btn" style="margin-top:16px" id="stSave">Save settings</button>
    <div class="btnrow" style="margin-top:10px"><button class="btn ghost" id="stExport">⬇︎ Backup data</button><button class="btn ghost" id="stImport">⬆︎ Restore</button></div>
    <input id="stFile" type="file" accept="application/json" class="hidden">
@@ -1402,6 +1435,20 @@ function settingsModal(){
   const paintTh=()=>$$('#stTheme button').forEach(b=>b.classList.toggle('on',b.dataset.th===(SET.theme||'auto')));
   paintTh();
   $('#stTheme').onclick=async e=>{const b=e.target.closest('[data-th]');if(!b)return;SET.theme=b.dataset.th;await saveSettings();applyTheme();paintTh();};
+  const ntPaint=()=>{
+    const st=$('#ntStatus'),btn=$('#ntBtn');
+    if(!notifySupported()){st.textContent='Not supported in this browser';btn.style.display='none';return;}
+    if(Notification.permission==='denied'){st.textContent='Blocked in browser settings';btn.style.display='none';return;}
+    if(SET.notify&&Notification.permission==='granted'){st.textContent='On ✓';btn.textContent='Disable';}
+    else{st.textContent='Off';btn.textContent='Enable';}
+  };
+  ntPaint();
+  $('#ntBtn').onclick=async()=>{
+    if(SET.notify&&Notification.permission==='granted'){SET.notify=false;await saveSettings();ntPaint();return;}
+    const p=await Notification.requestPermission();
+    if(p==='granted'){SET.notify=true;await saveSettings();registerPeriodic();toast('Notifications on');}
+    ntPaint();
+  };
   const readSyncFields=()=>{
     const url=$('#sbUrl').value.trim(),anonKey=$('#sbAnon').value.trim(),email=$('#sbEmail').value.trim(),pass=$('#sbPass').value;
     SET.sync=(url||anonKey||email)?{...(SET.sync||{}),url,anonKey,email,pass}:null;
@@ -1545,6 +1592,8 @@ async function seedIfEmpty(){
   $('#calTarget').textContent=SET.targets.kcal;
   go('today');
   if('serviceWorker'in navigator){try{await navigator.serviceWorker.register('service-worker.js');}catch(e){}}
+  notifyCoach();
+  if(SET.notify)registerPeriodic();
 })();
 </script>
 </body>

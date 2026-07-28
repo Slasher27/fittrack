@@ -273,16 +273,21 @@ Original Phase A design (for reference):
 - 10 headless checks passing (accumulate/undo/per-day/migration/sync
   stamps/target badge/rule gating/persistence).
 
-### Phase C — notifications (honest PWA limits)
+### Phase C — notifications — [x] SHIPPED (2026-07-28)
 
-- Settings toggle → Notifications API permission.
-- On-launch local notifications for high-severity insights (works everywhere
-  once the app is opened).
-- Android/Chrome installed-PWA extras (best-effort): Periodic Background
-  Sync to surface reminders (Mon/Wed/Fri workout nudge, evening log
-  reminder) without the app open. **iOS cannot do background notifications
-  without a push server** — document in-app; a push backend stays an
-  explicit opt-in future decision (roadmap #6 territory).
+- Settings → Notifications: Enable/Disable with permission flow and status
+  (Off / On ✓ / Blocked / Not supported); iOS limitation stated in the UI.
+- **On-launch Coach alert** (all platforms): one notification per day
+  summarising up to 3 undismissed warn-level insights (`notifyCoach()`,
+  gated by `SET.lastNotify`).
+- **Android installed-PWA background nudges** (best-effort): Periodic
+  Background Sync (`fittrack-daily`, 12 h min) — the SW reads IndexedDB
+  directly: training-day reminder after 15:00 if no session logged; "nothing
+  logged today" after 19:00. `notificationclick` focuses/opens the app.
+- No push server, by design — iOS gets alerts only while the app is open.
+- 7 headless checks passing (enable/disable, launch alert content,
+  once-per-day gate). Background sync path is guard-wrapped; verify on a
+  real Android install.
 
 ### Phase D — AI coach (optional layer, existing key infra)
 
@@ -374,6 +379,7 @@ editor, create the auth user, enter credentials in ⚙️ Settings (probe on
 | Date | Session summary |
 |---|---|
 | 2026-07-28 | Scanned codebase, agreed enhancement plan (this document). Batch 1 scope confirmed: Today's-plan card, recent foods + repeat-yesterday, dark mode, motion pass. No code changes yet. |
+| 2026-07-28 | **Phase C shipped: notifications.** Opt-in toggle in Settings, once-daily launch alert with warn-level Coach insights, Android background nudges via Periodic Background Sync (SW reads IndexedDB: training-day + evening-log reminders), tap-to-open. iOS in-app-only, documented. 7 checks passing. Uncommitted batch grows: measurement edit + water + program/equipment + notifications, under `fittrack-v5`. Remaining from smart-coach plan: Phase D (AI weekly report + data-aware Ask + AI program revision). |
 | 2026-07-28 | **Phase E shipped: editable program + equipment registry.** Program → kv data with per-day editor (rename, weekday schedule, add/remove/reorder typed exercises, add/delete days); 🎒 My gym editor; progression advice now type+equipment driven (new dumbbells/bells re-tune ceilings instantly); program & equipment sync across devices via `SYNCED_KV`. 13 checks passing. No workout/equipment change ever needs code again. Uncommitted batch: water + measurement edit + program/equipment, under `fittrack-v5`. |
 | 2026-07-28 | **Phase B shipped: water tracking.** 💧 card on Today (+250/+500/undo, 3 L bar, ✓ badge), `water` store → IndexedDB v2 migration, synced/backed-up/erasable, `water-low` Coach rule (after 15:00, <1 L). 10 checks passing. Uncommitted with measurement editing — both preview on the local dev server; SW cache `fittrack-v5` covers the batch. |
 | 2026-07-28 | **Measurement editing** (user request after testing a weight-only entry): ✎ on measurement cards, prefilled edit modal, same-id update so sync propagates edits. Fixed a modal focus-steal bug (60 ms focus grab could swallow first keystrokes). SW cache → `fittrack-v5` (v4 is now the deployed baseline). 7 checks passing. Uncommitted — user previewing on local dev server first. |
