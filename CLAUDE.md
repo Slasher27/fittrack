@@ -19,9 +19,13 @@ protein target).
 - **Zero dependencies, no build step.** Everything is hand-written vanilla
   HTML/CSS/JS. There is no npm, no bundler, no framework, no transpile step.
   You edit the source files and they run as-is.
-- **Fully offline & local.** All user data lives in the browser's **IndexedDB**
-  on the user's device. Nothing is uploaded to any server. There is no backend
-  and no network calls at runtime (a service worker caches the app shell).
+- **Local-first.** All user data lives in the browser's **IndexedDB** and every
+  feature works fully offline. Two *optional, opt-in* network integrations
+  exist (both configured in Settings, both degrade gracefully offline):
+  **Supabase cloud sync** (multi-device data; see `SETUP-SYNC.md` and §4.2 —
+  always write through `idbPut`/`idbDel` so records get sync stamps) and the
+  **AI assistant** (Anthropic API). Never add a network dependency to a core
+  flow.
 - **Installable PWA.** Manifest + service worker make it installable to a phone
   home screen and usable with no connection.
 - **Single-file app logic.** Essentially the entire application (markup, styles,
@@ -47,6 +51,8 @@ fittrack/
 ├── apple-touch-icon.png
 ├── favicon.png
 ├── README.md           ← End-user deploy/install instructions.
+├── SETUP-SYNC.md       ← One-time Supabase sync setup steps (user-facing).
+├── supabase-schema.sql ← Schema for the sync backend (run in Supabase SQL editor).
 ├── UI-UX-PLAN.md       ← Active UI/UX enhancement plan + session log (see §10).
 └── CLAUDE.md           ← This file.
 ```
@@ -127,6 +133,15 @@ A tiny promise wrapper around IndexedDB (db name `fittrack`, version 1):
 `kv` singletons:
 - `{k:'settings', targets:{kcal, protein, carbs, fat}, goalWeight, startWeight}`
 - `{k:'mealSeedVersion', v:<int>}` — see §5.
+
+**Cloud sync (optional):** stores in `SYNC_STORES` (`foods`, `meals`, `log`,
+`measurements`, `workouts`) sync to a single generic Supabase `records` table
+(last-write-wins). `idbPut` stamps `up` (ms timestamp) and `idbDel` records a
+tombstone in `kv.tombstones`; pulled changes pass `fromSync=true` to bypass
+stamping. **Always mutate through these helpers** or records won't sync.
+Photos and `kv` are device-local. Sync credentials live in `SET.sync` and are
+stripped from backups. The service worker must never intercept cross-origin
+requests (see the origin check in `service-worker.js`).
 
 **Macro model:** each food stores macros **per one serving**. `serving` is a
 human label. For weight/volume foods it's `"100 g"`, `"40 g"`, `"100 ml"` etc,

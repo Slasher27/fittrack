@@ -366,8 +366,18 @@ function openDB(){return new Promise((res,rej)=>{const r=indexedDB.open('fittrac
 function tx(store,mode='readonly'){return DB.transaction(store,mode).objectStore(store);}
 function idbGetAll(store){return new Promise((res,rej)=>{const r=tx(store).getAll();r.onsuccess=()=>res(r.result||[]);r.onerror=rej;});}
 function idbGet(store,k){return new Promise((res,rej)=>{const r=tx(store).get(k);r.onsuccess=()=>res(r.result);r.onerror=rej;});}
-function idbPut(store,v){return new Promise((res,rej)=>{const r=tx(store,'readwrite').put(v);r.onsuccess=()=>res(v);r.onerror=rej;});}
-function idbDel(store,k){return new Promise((res,rej)=>{const r=tx(store,'readwrite').delete(k);r.onsuccess=()=>res();r.onerror=rej;});}
+/* Cloud sync (Supabase): stores below sync; writes stamp `up` (ms), deletes leave tombstones.
+   `fromSync=true` bypasses stamping so pulled records don't re-trigger a push loop. */
+const SYNC_STORES=new Set(['foods','meals','log','measurements','workouts']);
+function idbPut(store,v,fromSync){
+  if(!fromSync&&SYNC_STORES.has(store)){v.up=Date.now();syncSoon();}
+  return new Promise((res,rej)=>{const r=tx(store,'readwrite').put(v);r.onsuccess=()=>res(v);r.onerror=rej;});}
+function idbDel(store,k,fromSync){
+  if(!fromSync&&SYNC_STORES.has(store)){recordTombstone(store,k);syncSoon();}
+  return new Promise((res,rej)=>{const r=tx(store,'readwrite').delete(k);r.onsuccess=()=>res();r.onerror=rej;});}
+async function recordTombstone(store,id){
+  const rec=(await idbGet('kv','tombstones'))||{k:'tombstones',v:[]};
+  rec.v.push({store,id,up:Date.now()});await idbPut('kv',rec);}
 function idbByDate(store,date){return new Promise((res,rej)=>{const r=tx(store).index('date').getAll(date);r.onsuccess=()=>res(r.result||[]);r.onerror=rej;});}
 
 /* ---------- Seed data ---------- */
@@ -720,6 +730,67 @@ function applyTheme(){
   if(curView==='body')renderBody(); // canvas chart samples CSS vars at draw time
 }
 darkMQ.addEventListener('change',()=>{if((SET.theme||'auto')==='auto')applyTheme();});
+
+/* ---------- Cloud sync engine (Supabase; single generic `records` table) ---------- */
+let syncTimer=null,syncBusy=false;
+function syncConfigured(){const s=SET.sync;return !!(s&&s.url&&s.anonKey&&s.email&&s.pass);}
+function syncSoon(){if(!syncConfigured()||!navigator.onLine)return;clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncNow().catch(()=>{}),4000);}
+function sb(path,opts={},withAuth=true){
+  const s=SET.sync;
+  return fetch(s.url.replace(/\/+$/,'')+path,{...opts,headers:{
+    apikey:s.anonKey,
+    ...(withAuth&&s.token?{Authorization:'Bearer '+s.token}:{}),
+    'content-type':'application/json',...(opts.headers||{})}});
+}
+async function sbGrant(body){
+  const kind=body.refresh_token?'refresh_token':'password';
+  const res=await sb('/auth/v1/token?grant_type='+kind,{method:'POST',body:JSON.stringify(body)},false);
+  if(!res.ok)return false;
+  const d=await res.json();const s=SET.sync;
+  s.token=d.access_token;s.refresh=d.refresh_token;s.tokenExp=Date.now()+((d.expires_in||3600)-60)*1000;
+  await saveSettings();return true;
+}
+async function ensureToken(){
+  const s=SET.sync;
+  if(s.token&&Date.now()<(s.tokenExp||0))return;
+  if(s.refresh&&await sbGrant({refresh_token:s.refresh}))return;
+  if(!await sbGrant({email:s.email,password:s.pass}))throw new Error('sign-in failed — check email/password');
+}
+async function syncNow(){
+  if(!syncConfigured())throw new Error('sync not configured');
+  if(syncBusy)return 0;syncBusy=true;
+  const s=SET.sync;
+  try{
+    await ensureToken();
+    // PUSH: everything stamped since the last successful push, plus tombstones
+    const lastPush=s.lastPush||0;const payload=[];let maxUp=lastPush;
+    for(const st of SYNC_STORES){
+      for(const r of await idbGetAll(st))
+        if((r.up||0)>lastPush){payload.push({store:st,id:r.id,data:r,up:r.up,deleted:false});maxUp=Math.max(maxUp,r.up);}
+    }
+    const tomb=(await idbGet('kv','tombstones'))?.v||[];
+    for(const t of tomb){payload.push({store:t.store,id:t.id,data:null,up:t.up,deleted:true});maxUp=Math.max(maxUp,t.up);}
+    if(payload.length){
+      const res=await sb('/rest/v1/records?on_conflict=store,id',{method:'POST',headers:{Prefer:'resolution=merge-duplicates'},body:JSON.stringify(payload)});
+      if(!res.ok)throw new Error('push failed ('+res.status+')');
+      s.lastPush=maxUp;await idbPut('kv',{k:'tombstones',v:[]});
+    }
+    // PULL: rows newer than our last pull; apply if newer than local (last write wins)
+    const res2=await sb('/rest/v1/records?select=*&up=gt.'+(s.lastPull||0)+'&order=up.asc',{});
+    if(!res2.ok)throw new Error('pull failed ('+res2.status+')');
+    const rows=await res2.json();let applied=0;
+    for(const row of rows){
+      if(!SYNC_STORES.has(row.store))continue;
+      if(row.deleted){await idbDel(row.store,row.id,true);applied++;continue;}
+      const local=await idbGet(row.store,row.id);
+      if(!local||(local.up||0)<row.up){await idbPut(row.store,row.data,true);applied++;}
+    }
+    if(rows.length)s.lastPull=Math.max(s.lastPull||0,...rows.map(r=>r.up));
+    s.lastSync=Date.now();await saveSettings();
+    return applied;
+  }finally{syncBusy=false;}
+}
+window.addEventListener('online',()=>syncSoon());
 
 /* ---------- State ---------- */
 let curDate=todayStr();
@@ -1192,6 +1263,12 @@ function settingsModal(){
    <div class="in2"><div><span class="xs muted">Calories</span><input id="stK" type="number" value="${T.kcal}"></div><div><span class="xs muted">Protein g</span><input id="stP" type="number" value="${T.protein}"></div></div>
    <div class="in2" style="margin-top:8px"><div><span class="xs muted">Carbs g</span><input id="stC" type="number" value="${T.carbs}"></div><div><span class="xs muted">Fat g</span><input id="stF" type="number" value="${T.fat}"></div></div>
    <div class="in2" style="margin-top:10px"><div><label class="fl">Start weight (kg)</label><input id="stSW" type="number" step="0.1" value="${SET.startWeight}"></div><div><label class="fl">Goal weight (kg)</label><input id="stGW" type="number" step="0.1" value="${SET.goalWeight}"></div></div>
+   <label class="fl">Cloud sync (Supabase — optional)</label>
+   <input id="sbUrl" placeholder="Project URL (https://xxxx.supabase.co)" value="${esc(SET.sync?.url||'')}">
+   <div class="in2" style="margin-top:8px"><input id="sbEmail" type="email" placeholder="Email" autocomplete="off" value="${esc(SET.sync?.email||'')}"><input id="sbPass" type="password" placeholder="Password" autocomplete="new-password" value="${esc(SET.sync?.pass||'')}"></div>
+   <input id="sbAnon" type="password" placeholder="anon public key" autocomplete="off" value="${esc(SET.sync?.anonKey||'')}" style="margin-top:8px">
+   <div class="row between" style="margin-top:8px"><span class="xs muted" id="sbStatus">${SET.sync?.lastSync?'Last synced '+new Date(SET.sync.lastSync).toLocaleString():'Not synced yet'}</span><button class="btn sec sm" id="sbSyncNow">Sync now</button></div>
+   <p class="xs muted" style="margin:6px 0 0">One-time setup steps are in SETUP-SYNC.md. Data syncs across your devices; photos stay on-device (v1).</p>
    <label class="fl">AI assistant key (optional)</label>
    <input id="stAI" type="password" placeholder="Anthropic API key (sk-ant-…)" value="${esc(SET.aiKey||'')}">
    <p class="xs muted" style="margin:6px 0 0">Stored only on this device. Powers “Ask” on the 📖 Plan screen; without it, Ask searches the plan offline.</p>
@@ -1203,7 +1280,18 @@ function settingsModal(){
   const paintTh=()=>$$('#stTheme button').forEach(b=>b.classList.toggle('on',b.dataset.th===(SET.theme||'auto')));
   paintTh();
   $('#stTheme').onclick=async e=>{const b=e.target.closest('[data-th]');if(!b)return;SET.theme=b.dataset.th;await saveSettings();applyTheme();paintTh();};
-  $('#stSave').onclick=async()=>{SET.targets={kcal:+$('#stK').value||0,protein:+$('#stP').value||0,carbs:+$('#stC').value||0,fat:+$('#stF').value||0};SET.startWeight=+$('#stSW').value||83;SET.goalWeight=+$('#stGW').value||76.5;SET.aiKey=$('#stAI').value.trim();await saveSettings();closeModal();toast('Settings saved');renderToday();if(curView==='plan')renderPlan();};
+  const readSyncFields=()=>{
+    const url=$('#sbUrl').value.trim(),anonKey=$('#sbAnon').value.trim(),email=$('#sbEmail').value.trim(),pass=$('#sbPass').value;
+    SET.sync=(url||anonKey||email)?{...(SET.sync||{}),url,anonKey,email,pass}:null;
+  };
+  $('#sbSyncNow').onclick=async()=>{
+    readSyncFields();await saveSettings();
+    if(!syncConfigured())return toast('Fill in all four sync fields first');
+    $('#sbStatus').textContent='Syncing…';
+    try{const n=await syncNow();$('#sbStatus').textContent='Synced ✓ '+new Date().toLocaleTimeString();toast(n?`Synced — ${n} update${n>1?'s':''} pulled`:'Synced ✓');go(curView);}
+    catch(err){$('#sbStatus').textContent='Sync failed';toast('Sync failed: '+err.message);}
+  };
+  $('#stSave').onclick=async()=>{SET.targets={kcal:+$('#stK').value||0,protein:+$('#stP').value||0,carbs:+$('#stC').value||0,fat:+$('#stF').value||0};SET.startWeight=+$('#stSW').value||83;SET.goalWeight=+$('#stGW').value||76.5;SET.aiKey=$('#stAI').value.trim();readSyncFields();await saveSettings();closeModal();toast('Settings saved');renderToday();if(curView==='plan')renderPlan();syncSoon();};
   $('#stExport').onclick=exportData;
   $('#stImport').onclick=()=>$('#stFile').click();
   $('#stFile').onchange=importData;
@@ -1211,8 +1299,8 @@ function settingsModal(){
 }
 async function exportData(){
   const data={version:1,exportedAt:new Date().toISOString(),
-    // never export the API key — backups are plain JSON the user may share
-    kv:(await idbGetAll('kv')).map(r=>r.k==='settings'?{...r,aiKey:undefined}:r),
+    // never export secrets (API key, sync credentials) — backups are plain JSON the user may share
+    kv:(await idbGetAll('kv')).filter(r=>r.k!=='tombstones').map(r=>r.k==='settings'?{...r,aiKey:undefined,sync:undefined}:r),
     foods:(await idbGetAll('foods')).filter(f=>f.custom),
     meals:(await idbGetAll('meals')).filter(m=>m.custom),
     log:await idbGetAll('log'),measurements:await idbGetAll('measurements'),workouts:await idbGetAll('workouts')};
@@ -1227,7 +1315,10 @@ function b64ToBlob(d){const[meta,b]=d.split(',');const mime=meta.match(/:(.*?);/
 async function importData(e){const file=e.target.files[0];if(!file)return;try{const d=JSON.parse(await file.text());
   if(!confirm('Restore this backup? It merges into your current data.'))return;
   for(const r of d.kv||[]){
-    if(r.k==='settings'&&!r.aiKey&&SET.aiKey)r.aiKey=SET.aiKey; // keep the on-device key through a restore
+    if(r.k==='settings'){ // keep on-device secrets through a restore
+      if(!r.aiKey&&SET.aiKey)r.aiKey=SET.aiKey;
+      if(!r.sync&&SET.sync)r.sync=SET.sync;
+    }
     await idbPut('kv',r);
   }
   for(const r of d.foods||[])await idbPut('foods',r);
@@ -1316,6 +1407,7 @@ async function seedIfEmpty(){
 (async function init(){
   await openDB();await seedIfEmpty();await loadSettings();
   applyTheme();
+  if(syncConfigured()&&navigator.onLine)syncNow().then(n=>{if(n)go(curView);}).catch(()=>{});
   $('#calTarget').textContent=SET.targets.kcal;
   go('today');
   if('serviceWorker'in navigator){try{await navigator.serviceWorker.register('service-worker.js');}catch(e){}}

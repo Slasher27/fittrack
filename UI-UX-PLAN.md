@@ -321,6 +321,33 @@ the perceived intelligence. Ship rules: SW cache bump per deploy; DB version
 bump in Phase B only. Phase E is backend-independent (works in vanilla,
 unaffected by the Path A/B sync decision).
 
+## Cloud sync backend — decision in progress (2026-07-28)
+
+User wants multi-device data (the real limitation behind "it only works
+offline"). **Supabase was proposed and rejected — the user wants SQLite
+specifically.** Key fact: SQLite cannot live on Netlify (static hosting +
+ephemeral functions; no persistent writable disk). SQLite-honouring options
+presented:
+
+1. **Own shared hosting (cPanel/PHP) + SQLite file** — a tiny PHP REST API
+   in front of an SQLite file on hosting the user already pays for. True
+   SQLite, full ownership, no new vendor. Needs HTTPS + a bearer token.
+2. **Turso (libSQL)** — hosted SQLite-compatible DB with HTTP API; managed,
+   free tier, but a third-party account (may fail the same test as Supabase).
+3. **Cloudflare D1** — SQLite at the edge, but requires moving off Netlify.
+
+**RESOLVED: user chose Supabase after the SQLite/Netlify explanation.
+Sync layer SHIPPED 2026-07-28** (mock-verified, 11 checks): sync-aware
+`idbPut`/`idbDel` (`up` stamps + tombstones), generic `records` table
+(`supabase-schema.sql`), email/password auth with token refresh, debounced
+auto-push (4 s) + pull on launch/online/manual, last-write-wins, Settings UI,
+credentials stripped from backups, `SETUP-SYNC.md` guide. Photos + `kv`
+device-local in v1. **Bug fixed en route:** service worker was intercepting
+cross-origin GETs cache-first (would have corrupted any API call) — now
+same-origin only. **User still to do:** run `supabase-schema.sql` in the SQL
+editor, create the auth user, enter credentials in ⚙️ Settings (probe on
+2026-07-28 confirmed project live, table not yet created).
+
 ## Explicitly rejected (don't revisit without new reasons)
 
 - Swipeable tab gestures — conflicts with scroll and the browser/PWA
@@ -336,6 +363,7 @@ unaffected by the Path A/B sync decision).
 | Date | Session summary |
 |---|---|
 | 2026-07-28 | Scanned codebase, agreed enhancement plan (this document). Batch 1 scope confirmed: Today's-plan card, recent foods + repeat-yesterday, dark mode, motion pass. No code changes yet. |
+| 2026-07-28 | **Supabase cloud sync shipped** (user chose Supabase after SQLite/Netlify explanation). Local-first sync engine: `up` stamps + tombstones in the data layer, generic `records` table, email/password auth + refresh, debounced auto-push, pull on launch/online/manual, Settings UI, secrets stripped from backups. `supabase-schema.sql` + `SETUP-SYNC.md` added; CLAUDE.md principle updated to "local-first". **Critical SW bug fixed**: cross-origin GETs were served cache-first (broke any API GET) — now same-origin only. 11 mocked-API checks passing. User's project probed live (`ahsgvjugkmzuascvaclm.supabase.co`) — table + auth user still to be created by user, then enter creds in ⚙️ Settings. |
 | 2026-07-28 | **Smart Coach Phase A shipped.** 🧠 Coach card on Today: 13-rule insights engine over local data (weight adjustment rules, calorie/protein drift, double-progression prompts, plateau watch, equipment ceilings, deload, consistency nudges, goal-reached adaptation) with dismissals + cooldowns; ↑ progression prescriptions inside the workout logger. 13 seeded-scenario checks passing. Next: Phase B (water), C (notifications), D (AI coach + evidence refresh). Architecture question raised (Svelte/shadcn/SQLite) — decision: stay vanilla; revisit only if cloud sync (roadmap #6) or file size becomes unmanageable. |
 | 2026-07-28 | **Meal editing + mobile/a11y audit.** ✎ edit for all meals (plan meals convert to custom copies in-slot), hover/cursor/chevron affordance on clickable rows, fixed latent delete-✕-opens-modal bug. Full audit applied: pinch-zoom re-enabled, dialog semantics + Escape + focus + scroll-lock on modals, keyboard-activatable rows, aria labels/landmarks/alt text/live toasts, contrast + tap-target bumps. 27 automated checks passing at 320px & 390px. Backlog captured under "Mobile responsiveness & accessibility audit". Still within the pending `fittrack-v4` bump. |
 | 2026-07-28 | **Desktop modal polish** (user-reported on the deployed Netlify site): thin themed scrollbar on `.modal` (light+dark, rounded thumb, track inset from the rounded corners), desktop modals narrowed to 520px max-width / 86vh, number-input spinners hidden. Also security fix: backup export strips `aiKey`; restore preserves the on-device key. Covered by the pending `fittrack-v4` bump. |

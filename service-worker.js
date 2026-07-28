@@ -26,6 +26,8 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET') return;
+  // Never intercept cross-origin calls (Supabase sync, Anthropic API) — cache is for the app shell only.
+  if (new URL(req.url).origin !== self.location.origin) return;
   e.respondWith(
     caches.match(req).then(cached => {
       if (cached) return cached;
