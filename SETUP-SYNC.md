@@ -25,10 +25,11 @@ whenever you're online. Photos stay on-device in v1.
 
 ## 4. Get the two values the app needs
 
-1. **Project Settings (gear) → API**:
+1. **Project Settings (gear) → API Keys**:
    - **Project URL** — looks like `https://abcdefgh.supabase.co`
-   - **anon public** key — the long `eyJ…` string under "Project API keys".
-     (The anon key is designed to be public; your data is protected by the
+   - **Publishable key** — starts with `sb_publishable_…`. (Older projects
+     call this the "anon public" key, a long `eyJ…` string — either works.
+     This key is designed to be public; your data is protected by your
      sign-in, not by hiding this key.)
 
 ## 5. Configure the app (on every device you use)

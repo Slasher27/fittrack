@@ -1266,7 +1266,7 @@ function settingsModal(){
    <label class="fl">Cloud sync (Supabase — optional)</label>
    <input id="sbUrl" placeholder="Project URL (https://xxxx.supabase.co)" value="${esc(SET.sync?.url||'')}">
    <div class="in2" style="margin-top:8px"><input id="sbEmail" type="email" placeholder="Email" autocomplete="off" value="${esc(SET.sync?.email||'')}"><input id="sbPass" type="password" placeholder="Password" autocomplete="new-password" value="${esc(SET.sync?.pass||'')}"></div>
-   <input id="sbAnon" type="password" placeholder="anon public key" autocomplete="off" value="${esc(SET.sync?.anonKey||'')}" style="margin-top:8px">
+   <input id="sbAnon" type="password" placeholder="Publishable key (sb_publishable_…) or anon key" autocomplete="off" value="${esc(SET.sync?.anonKey||'')}" style="margin-top:8px">
    <div class="row between" style="margin-top:8px"><span class="xs muted" id="sbStatus">${SET.sync?.lastSync?'Last synced '+new Date(SET.sync.lastSync).toLocaleString():'Not synced yet'}</span><button class="btn sec sm" id="sbSyncNow">Sync now</button></div>
    <p class="xs muted" style="margin:6px 0 0">One-time setup steps are in SETUP-SYNC.md. Data syncs across your devices; photos stay on-device (v1).</p>
    <label class="fl">AI assistant key (optional)</label>
