@@ -111,7 +111,9 @@ send any user data beyond the typed question.
   Every navigation goes through `go()`.
 
 ### 4.2 Data layer (IndexedDB)
-A tiny promise wrapper around IndexedDB (db name `fittrack`, version 1):
+A tiny promise wrapper around IndexedDB (db name `fittrack`, version 2 —
+v2 added the `water` store; migrations run in `onupgradeneeded`, whose
+`contains()` guards make it safe for both fresh installs and upgrades):
 
 - `openDB()` — opens/creates stores in `onupgradeneeded`.
 - `tx(store, mode)` → object store handle.
@@ -129,13 +131,14 @@ A tiny promise wrapper around IndexedDB (db name `fittrack`, version 1):
 | `measurements` | `id` | `date` | `{id, date, weight, waist, chest, arm, thigh, notes}` |
 | `photos` | `id` | `date` | `{id, date, category:'Front'|'Side'|'Back', note, blob:Blob, ts}` |
 | `workouts` | `id` | `date` | `{id, date, dayKey:'A'|'B'|'C', title, notes, ts, exercises:[{name, target, sets:[{weight, reps}]}]}` |
+| `water` | `id` | `date` | `{id, date, ml, ts}` — one row per +250/+500 tap; daily total is the sum (target `WATER_TARGET_ML` = 3000) |
 
 `kv` singletons:
 - `{k:'settings', targets:{kcal, protein, carbs, fat}, goalWeight, startWeight}`
 - `{k:'mealSeedVersion', v:<int>}` — see §5.
 
 **Cloud sync (optional):** stores in `SYNC_STORES` (`foods`, `meals`, `log`,
-`measurements`, `workouts`) sync to a single generic Supabase `records` table
+`measurements`, `workouts`, `water`) sync to a single generic Supabase `records` table
 (last-write-wins). `idbPut` stamps `up` (ms timestamp) and `idbDel` records a
 tombstone in `kv.tombstones`; pulled changes pass `fromSync=true` to bypass
 stamping. **Always mutate through these helpers** or records won't sync.
@@ -159,8 +162,13 @@ so logging is a decimal multiplier (e.g. 180 g chicken = `1.8` servings of a
   slot: `[id, day('Mon'..'Sun'), slot('Breakfast'|'Lunch'|'Snack'|'Dinner'),
   name, items[]]`. Plus lookup consts `DAY_FULL`, `DAY_ORDER`, `SLOT_ORDER`,
   `SLOT_KEY`.
-- **`PROGRAM`** — the 3 workout templates `A`/`B`/`C`, each `{title, ex:[[name,
-  targetRepScheme], ...]}`.
+- **`DEFAULT_PROGRAM`** — seed for the training program. At runtime the program
+  is **user data**: kv key `program` (`{days:{A:{title,ex:[{name,target,type}]}},
+  schedule:{Mon:'A',…}}`), loaded into the `PROG` global and edited in-app
+  (Train → ✎ per day, + Add day). `type` (one of `EX_TYPES`) drives the
+  Coach's progression advice. Equipment likewise: kv key `equipment` →
+  `EQUIP` global, edited via Train → 🎒 My gym. Both kv keys sync across
+  devices (`SYNCED_KV`); seeded only when absent — never overwrite user edits.
 
 ### 4.4 Render functions (one per view)
 - `renderToday()` — the dashboard. Sums today's `log` entries, updates the

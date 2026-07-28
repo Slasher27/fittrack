@@ -262,13 +262,16 @@ Original Phase A design (for reference):
   dismissible; dismissals stored in `kv` with per-rule cooldowns so nothing
   nags. Highlight count on the 🏠 tab badge (optional).
 
-### Phase B — water tracking (enables hydration insights)
+### Phase B — water tracking — [x] SHIPPED (2026-07-28)
 
-- Quick-add buttons on Today (+250/+500 ml), daily total vs 3 L plan target.
-- Needs a new `water` object store → **IndexedDB version bump to 2** with
-  migration in `onupgradeneeded` (first DB migration — follow CLAUDE.md §5
-  care; export/import must include the new store).
-- Hydration rules: "under 1 L by mid-afternoon", "daily target met ✓".
+- 💧 card on Today: +250/+500 quick-add, ↺ undo, progress bar vs 3 L target
+  (`WATER_TARGET_ML`), ✓ badge on target, per-day via the date nav.
+- `water` store added → **IndexedDB v2** (first migration; `contains()`
+  guards keep it safe for existing v1 installs). Covered by sync
+  (`SYNC_STORES`), backup/restore, and erase-all.
+- Coach rule `water-low`: under 1 L after 15:00 → nudge (24 h cooldown).
+- 10 headless checks passing (accumulate/undo/per-day/migration/sync
+  stamps/target badge/rule gating/persistence).
 
 ### Phase C — notifications (honest PWA limits)
 
@@ -290,7 +293,15 @@ Original Phase A design (for reference):
   summary with plan questions so answers reference *actual* progress, not
   just the plan. Clearly labelled since it sends logged data to the API.
 
-### Phase E — data-driven program & equipment (agreed 2026-07-28, not started)
+### Phase E — data-driven program & equipment — [x] SHIPPED (2026-07-28)
+
+Implemented as designed (13 headless checks passing): program lives in kv
+(`PROG`, seeded once from `DEFAULT_PROGRAM`), per-day editor (title, weekday
+schedule checkboxes, add/remove/reorder exercises with equipment `type`,
+add/delete days), 🎒 My gym equipment editor (`EQUIP`), typed
+`progressionAdvice()` re-tunes live on equipment changes, and both kv keys
+sync across devices (`SYNCED_KV`). Remaining from this phase's scope: AI
+program revision → folded into Phase D. Original design below:
 
 User need: change/dislike a workout, or buy new equipment, **without code
 changes**. Same seed-vs-custom pattern already proven with meals.
@@ -363,6 +374,9 @@ editor, create the auth user, enter credentials in ⚙️ Settings (probe on
 | Date | Session summary |
 |---|---|
 | 2026-07-28 | Scanned codebase, agreed enhancement plan (this document). Batch 1 scope confirmed: Today's-plan card, recent foods + repeat-yesterday, dark mode, motion pass. No code changes yet. |
+| 2026-07-28 | **Phase E shipped: editable program + equipment registry.** Program → kv data with per-day editor (rename, weekday schedule, add/remove/reorder typed exercises, add/delete days); 🎒 My gym editor; progression advice now type+equipment driven (new dumbbells/bells re-tune ceilings instantly); program & equipment sync across devices via `SYNCED_KV`. 13 checks passing. No workout/equipment change ever needs code again. Uncommitted batch: water + measurement edit + program/equipment, under `fittrack-v5`. |
+| 2026-07-28 | **Phase B shipped: water tracking.** 💧 card on Today (+250/+500/undo, 3 L bar, ✓ badge), `water` store → IndexedDB v2 migration, synced/backed-up/erasable, `water-low` Coach rule (after 15:00, <1 L). 10 checks passing. Uncommitted with measurement editing — both preview on the local dev server; SW cache `fittrack-v5` covers the batch. |
+| 2026-07-28 | **Measurement editing** (user request after testing a weight-only entry): ✎ on measurement cards, prefilled edit modal, same-id update so sync propagates edits. Fixed a modal focus-steal bug (60 ms focus grab could swallow first keystrokes). SW cache → `fittrack-v5` (v4 is now the deployed baseline). 7 checks passing. Uncommitted — user previewing on local dev server first. |
 | 2026-07-28 | **Supabase cloud sync shipped** (user chose Supabase after SQLite/Netlify explanation). Local-first sync engine: `up` stamps + tombstones in the data layer, generic `records` table, email/password auth + refresh, debounced auto-push, pull on launch/online/manual, Settings UI, secrets stripped from backups. `supabase-schema.sql` + `SETUP-SYNC.md` added; CLAUDE.md principle updated to "local-first". **Critical SW bug fixed**: cross-origin GETs were served cache-first (broke any API GET) — now same-origin only. 11 mocked-API checks passing. User's project probed live (`ahsgvjugkmzuascvaclm.supabase.co`) — table + auth user still to be created by user, then enter creds in ⚙️ Settings. |
 | 2026-07-28 | **Smart Coach Phase A shipped.** 🧠 Coach card on Today: 13-rule insights engine over local data (weight adjustment rules, calorie/protein drift, double-progression prompts, plateau watch, equipment ceilings, deload, consistency nudges, goal-reached adaptation) with dismissals + cooldowns; ↑ progression prescriptions inside the workout logger. 13 seeded-scenario checks passing. Next: Phase B (water), C (notifications), D (AI coach + evidence refresh). Architecture question raised (Svelte/shadcn/SQLite) — decision: stay vanilla; revisit only if cloud sync (roadmap #6) or file size becomes unmanageable. |
 | 2026-07-28 | **Meal editing + mobile/a11y audit.** ✎ edit for all meals (plan meals convert to custom copies in-slot), hover/cursor/chevron affordance on clickable rows, fixed latent delete-✕-opens-modal bug. Full audit applied: pinch-zoom re-enabled, dialog semantics + Escape + focus + scroll-lock on modals, keyboard-activatable rows, aria labels/landmarks/alt text/live toasts, contrast + tap-target bumps. 27 automated checks passing at 320px & 390px. Backlog captured under "Mobile responsiveness & accessibility audit". Still within the pending `fittrack-v4` bump. |

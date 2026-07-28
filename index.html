@@ -251,6 +251,7 @@
     <button class="qbtn" data-quick="train"><span class="ic">🏋️</span>Workout</button>
   </div>
 
+  <div id="todayWater"></div>
   <div id="todayCoach"></div>
   <div id="todayPlan"></div>
   <div id="todaySummary"></div>
@@ -353,12 +354,12 @@ function niceDate(s){const d=parseD(s),t=todayStr();if(s===t)return 'Today';cons
 
 /* ---------- IndexedDB ---------- */
 let DB;
-function openDB(){return new Promise((res,rej)=>{const r=indexedDB.open('fittrack',1);
+function openDB(){return new Promise((res,rej)=>{const r=indexedDB.open('fittrack',2); // v2: + water store
   r.onupgradeneeded=e=>{const db=e.target.result;
     if(!db.objectStoreNames.contains('kv'))db.createObjectStore('kv',{keyPath:'k'});
     if(!db.objectStoreNames.contains('foods'))db.createObjectStore('foods',{keyPath:'id'});
     if(!db.objectStoreNames.contains('meals'))db.createObjectStore('meals',{keyPath:'id'});
-    for(const s of ['log','measurements','photos','workouts']){
+    for(const s of ['log','measurements','photos','workouts','water']){
       if(!db.objectStoreNames.contains(s)){const os=db.createObjectStore(s,{keyPath:'id'});os.createIndex('date','date');}
     }
   };
@@ -368,9 +369,10 @@ function idbGetAll(store){return new Promise((res,rej)=>{const r=tx(store).getAl
 function idbGet(store,k){return new Promise((res,rej)=>{const r=tx(store).get(k);r.onsuccess=()=>res(r.result);r.onerror=rej;});}
 /* Cloud sync (Supabase): stores below sync; writes stamp `up` (ms), deletes leave tombstones.
    `fromSync=true` bypasses stamping so pulled records don't re-trigger a push loop. */
-const SYNC_STORES=new Set(['foods','meals','log','measurements','workouts']);
+const SYNC_STORES=new Set(['foods','meals','log','measurements','workouts','water']);
+const SYNCED_KV=new Set(['program','equipment']); // kv keys that sync (never settings/secrets)
 function idbPut(store,v,fromSync){
-  if(!fromSync&&SYNC_STORES.has(store)){v.up=Date.now();syncSoon();}
+  if(!fromSync&&(SYNC_STORES.has(store)||(store==='kv'&&SYNCED_KV.has(v.k)))){v.up=Date.now();syncSoon();}
   return new Promise((res,rej)=>{const r=tx(store,'readwrite').put(v);r.onsuccess=()=>res(v);r.onerror=rej;});}
 function idbDel(store,k,fromSync){
   if(!fromSync&&SYNC_STORES.has(store)){recordTombstone(store,k);syncSoon();}
@@ -475,17 +477,30 @@ const DAY_ORDER=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 const SLOT_ORDER={Breakfast:0,Lunch:1,Snack:2,Dinner:3};
 const SLOT_KEY={Breakfast:'breakfast',Lunch:'lunch',Snack:'snack',Dinner:'dinner'};
 
-const PROGRAM={
- A:{title:'Day A — Lower + Push (Mon)',ex:[
-   ['Back Squat','4 × 5'],['Bench Press','3 × 6–8'],['Romanian Deadlift','3 × 8–10'],
-   ['Pull-ups','3 × 6–10'],['KB Goblet Reverse Lunge','3 × 10/leg'],['Hanging Leg Raise','3 × 10–15'],['KB Swings','5 × 20']]},
- B:{title:'Day B — Upper + Pull (Wed)',ex:[
-   ['Deadlift','4 × 4–5'],['Overhead Press','3 × 6–8'],['Barbell Row','3 × 8–10'],
-   ['Weighted Dips','3 × 8–10'],['Lat Pulldown','3 × 12'],['Lateral Raise','3 × 15'],['Skipping intervals','8 × 40s']]},
- C:{title:'Day C — Full body (Fri)',ex:[
-   ['Front Squat','3 × 6–8'],['Incline Bench Press','3 × 8–10'],['Chin-ups','3 × AMRAP'],
-   ['KB Single-leg RDL','3 × 10–12'],['DB Curl','3 × 12–15'],['Triceps Pushdown','3 × 12–15'],['Core circuit','3 rounds']]},
+/* The training program is DATA (kv key 'program'), seeded once from this default and
+   editable in-app (Train → ✎). `type` drives the Coach's progression advice. */
+const EX_TYPES=['barbell-lower','barbell-upper','dumbbell','kettlebell','bodyweight','band','other'];
+const DEFAULT_PROGRAM={
+ days:{
+  A:{title:'Day A — Lower + Push (Mon)',ex:[
+    {name:'Back Squat',target:'4 × 5',type:'barbell-lower'},{name:'Bench Press',target:'3 × 6–8',type:'barbell-upper'},
+    {name:'Romanian Deadlift',target:'3 × 8–10',type:'barbell-lower'},{name:'Pull-ups',target:'3 × 6–10',type:'bodyweight'},
+    {name:'KB Goblet Reverse Lunge',target:'3 × 10/leg',type:'kettlebell'},{name:'Hanging Leg Raise',target:'3 × 10–15',type:'bodyweight'},
+    {name:'KB Swings',target:'5 × 20',type:'kettlebell'}]},
+  B:{title:'Day B — Upper + Pull (Wed)',ex:[
+    {name:'Deadlift',target:'4 × 4–5',type:'barbell-lower'},{name:'Overhead Press',target:'3 × 6–8',type:'barbell-upper'},
+    {name:'Barbell Row',target:'3 × 8–10',type:'barbell-upper'},{name:'Weighted Dips',target:'3 × 8–10',type:'bodyweight'},
+    {name:'Lat Pulldown',target:'3 × 12',type:'other'},{name:'Lateral Raise',target:'3 × 15',type:'dumbbell'},
+    {name:'Skipping intervals',target:'8 × 40s',type:'other'}]},
+  C:{title:'Day C — Full body (Fri)',ex:[
+    {name:'Front Squat',target:'3 × 6–8',type:'barbell-lower'},{name:'Incline Bench Press',target:'3 × 8–10',type:'barbell-upper'},
+    {name:'Chin-ups',target:'3 × AMRAP',type:'bodyweight'},{name:'KB Single-leg RDL',target:'3 × 10–12',type:'kettlebell'},
+    {name:'DB Curl',target:'3 × 12–15',type:'dumbbell'},{name:'Triceps Pushdown',target:'3 × 12–15',type:'other'},
+    {name:'Core circuit',target:'3 rounds',type:'other'}]},
+ },
+ schedule:{Mon:'A',Wed:'B',Fri:'C'}, // weekday → dayKey
 };
+let PROG=DEFAULT_PROGRAM; // replaced by the stored record at init
 
 /* ---------- The plan (from the original coaching document, 27 Jul 2026) ---------- */
 const PLAN_SECTIONS=[
@@ -719,6 +734,10 @@ async function askPlan(){
 /* ---------- Settings ---------- */
 let SET={k:'settings',targets:{kcal:2150,protein:180,carbs:190,fat:75},goalWeight:76.5,startWeight:83,theme:'auto'};
 async function loadSettings(){const s=await idbGet('kv','settings');if(s)SET=Object.assign(SET,s);}
+async function loadProgram(){
+  PROG=(await idbGet('kv','program'))?.v||PROG;
+  EQUIP=(await idbGet('kv','equipment'))?.v||EQUIP;
+}
 async function saveSettings(){await idbPut('kv',SET);}
 
 /* ---------- Theme ---------- */
@@ -768,6 +787,8 @@ async function syncNow(){
       for(const r of await idbGetAll(st))
         if((r.up||0)>lastPush){payload.push({store:st,id:r.id,data:r,up:r.up,deleted:false});maxUp=Math.max(maxUp,r.up);}
     }
+    for(const r of await idbGetAll('kv'))
+      if(SYNCED_KV.has(r.k)&&(r.up||0)>lastPush){payload.push({store:'kv',id:r.k,data:r,up:r.up,deleted:false});maxUp=Math.max(maxUp,r.up);}
     const tomb=(await idbGet('kv','tombstones'))?.v||[];
     for(const t of tomb){payload.push({store:t.store,id:t.id,data:null,up:t.up,deleted:true});maxUp=Math.max(maxUp,t.up);}
     if(payload.length){
@@ -778,13 +799,15 @@ async function syncNow(){
     // PULL: rows newer than our last pull; apply if newer than local (last write wins)
     const res2=await sb('/rest/v1/records?select=*&up=gt.'+(s.lastPull||0)+'&order=up.asc',{});
     if(!res2.ok)throw new Error('pull failed ('+res2.status+')');
-    const rows=await res2.json();let applied=0;
+    const rows=await res2.json();let applied=0,kvApplied=false;
     for(const row of rows){
-      if(!SYNC_STORES.has(row.store))continue;
-      if(row.deleted){await idbDel(row.store,row.id,true);applied++;continue;}
-      const local=await idbGet(row.store,row.id);
-      if(!local||(local.up||0)<row.up){await idbPut(row.store,row.data,true);applied++;}
+      const isKv=row.store==='kv'&&SYNCED_KV.has(row.id);
+      if(!SYNC_STORES.has(row.store)&&!isKv)continue;
+      if(row.deleted){if(!isKv){await idbDel(row.store,row.id,true);applied++;}continue;}
+      const local=await idbGet(row.store,isKv?row.id:row.id);
+      if(!local||(local.up||0)<row.up){await idbPut(row.store,row.data,true);applied++;if(isKv)kvApplied=true;}
     }
+    if(kvApplied)await loadProgram();
     if(rows.length)s.lastPull=Math.max(s.lastPull||0,...rows.map(r=>r.up));
     s.lastSync=Date.now();await saveSettings();
     return applied;
@@ -804,9 +827,20 @@ async function mealMacros(meal,fmap){fmap=fmap||foodMap(await idbGetAll('foods')
 
 /* ============================ COACH (insights engine) ============================ */
 /* Deterministic personal-trainer rules over local data. Offline, private, free. */
-const EQUIPMENT={dbMaxKg:10,kettlebells:[12,16,20,24,32],barKg:20,plateKg:162.5,microPlateKg:1.25,pulley:'high-to-low only'};
-const LOWER_LIFTS=new Set(['Back Squat','Front Squat','Deadlift','Romanian Deadlift','Hip Thrust']);
+const DEFAULT_EQUIPMENT={dbMaxKg:10,kettlebells:[12,16,20,24,32],barKg:20,plateKg:162.5,microPlateKg:1.25,pulley:'high-to-low only'};
+let EQUIP=DEFAULT_EQUIPMENT; // replaced by the stored 'equipment' kv record at init (editable via Train → 🎒 My gym)
+const WATER_TARGET_ML=3000; // plan: ~3 L/day
+const LOWER_LIFTS=new Set(['Back Squat','Front Squat','Deadlift','Romanian Deadlift','Hip Thrust']); // heuristic fallback only
 const DB_LIFTS=new Set(['DB Curl','Lateral Raise']);
+function exType(name){ // stored program first, then name heuristics (for historical/renamed lifts)
+  for(const d of Object.values(PROG.days))for(const e of d.ex)if(e.name===name)return e.type||'other';
+  if(DB_LIFTS.has(name))return 'dumbbell';
+  if(/^KB\b|Swings/.test(name))return 'kettlebell';
+  if(LOWER_LIFTS.has(name))return 'barbell-lower';
+  if(/press|row|bench/i.test(name))return 'barbell-upper';
+  if(/pull-?up|chin-?up|dip|raise$/i.test(name))return 'bodyweight';
+  return 'other';
+}
 
 function repTop(t){ // top of the rep range from a target like '3 × 6–8'; null for AMRAP/time/rounds
   if(!t||/amrap|round|min/i.test(t))return null;
@@ -818,19 +852,22 @@ function progressionAdvice(name,target,sets){ // double progression: all sets at
   const done=(sets||[]).filter(s=>+s.reps>0);if(!done.length)return null;
   if(!done.every(s=>+s.reps>=top))return null;
   const w=Math.max(...done.map(s=>+s.weight||0));
-  if(DB_LIFTS.has(name)){
-    if(w>=EQUIPMENT.dbMaxKg)return `you've maxed your ${EQUIPMENT.dbMaxKg} kg dumbbells — switch to the barbell or bands to keep progressing`;
-    return 'all sets at the top — move up to the next dumbbell';
+  switch(exType(name)){
+    case 'dumbbell':
+      if(w>=EQUIP.dbMaxKg)return `you've maxed your ${EQUIP.dbMaxKg} kg dumbbells — switch to the barbell or bands to keep progressing`;
+      return 'all sets at the top — move up to the next dumbbell';
+    case 'kettlebell':{
+      const next=EQUIP.kettlebells.find(k=>k>w);
+      return next?`all sets at the top — move up to the ${next} kg bell`:`you've maxed the ${Math.max(...EQUIP.kettlebells)} kg bell — add reps or slow the tempo`;}
+    case 'barbell-lower':return `all sets hit ${top} reps — add 2.5–5 kg and restart at the bottom of the range`;
+    case 'barbell-upper':return `all sets hit ${top} reps — add 1.25–2.5 kg and restart at the bottom of the range`;
+    case 'bodyweight':return `all sets hit ${top} reps — push past the target reps or add weight (dip belt)`;
+    default:return `all sets hit ${top} reps — progress reps, slow the tempo, or move to a harder variation`;
   }
-  if(/^KB\b|Swings/.test(name)){
-    const next=EQUIPMENT.kettlebells.find(k=>k>w);
-    return next?`all sets at the top — move up to the ${next} kg bell`:`you've maxed the 32 kg bell — add reps or slow the tempo`;
-  }
-  return `all sets hit ${top} reps — add ${LOWER_LIFTS.has(name)?'2.5–5':'1.25–2.5'} kg and restart at the bottom of the range`;
 }
 
 async function computeStats(){
-  const[logs,meas,wos,photos]=await Promise.all([idbGetAll('log'),idbGetAll('measurements'),idbGetAll('workouts'),idbGetAll('photos')]);
+  const[logs,meas,wos,photos,waterToday]=await Promise.all([idbGetAll('log'),idbGetAll('measurements'),idbGetAll('workouts'),idbGetAll('photos'),idbByDate('water',todayStr())]);
   const dayTotals={};logs.forEach(e=>{const d=dayTotals[e.date]=dayTotals[e.date]||{kcal:0,protein:0};d.kcal+=e.kcal;d.protein+=e.protein;});
   const dayOff=n=>{const d=new Date();d.setDate(d.getDate()-n);return dstr(d);};
   const days7=[];for(let i=1;i<=7;i++){const ds=dayOff(i);if(dayTotals[ds])days7.push(ds);} // logged days only; today excluded (incomplete)
@@ -851,10 +888,15 @@ async function computeStats(){
   const trainingWeeks=new Set(sorted.map(wo=>weekKey(wo.date))).size;
   const today=parseD(todayStr());const monOff=(today.getDay()+6)%7;
   const doneDates=new Set(sorted.map(wo=>wo.date));
-  const missed=[];[['Monday',0],['Wednesday',2],['Friday',4]].forEach(([n,off])=>{
-    if(off<monOff){const d=new Date(today);d.setDate(d.getDate()-monOff+off);if(!doneDates.has(dstr(d)))missed.push(n);}});
+  const offs={Mon:0,Tue:1,Wed:2,Thu:3,Fri:4,Sat:5,Sun:6};
+  const missed=[];
+  for(const[abbr,dk]of Object.entries(PROG.schedule||{})){
+    const off=offs[abbr];if(off==null||!PROG.days[dk])continue;
+    if(off<monOff){const d=new Date(today);d.setDate(d.getDate()-monOff+off);if(!doneDates.has(dstr(d)))missed.push(DAY_FULL[abbr]);}
+  }
   return{days7,kcal7,protLow,trend,lastWeigh,sinceWeigh:since(lastWeigh&&lastWeigh.date),lastPhoto,sincePhoto:since(lastPhoto),
-    perLift,trainingWeeks,missed,hasWorkouts:sorted.length>0,hasLogs:logs.length>0};
+    perLift,trainingWeeks,missed,hasWorkouts:sorted.length>0,hasLogs:logs.length>0,
+    waterMl:waterToday.reduce((s,w)=>s+w.ml,0)};
 }
 
 /* Each rule: check(stats) → false | {t: title, b: body(html-safe)} */
@@ -877,11 +919,13 @@ const INSIGHT_RULES=[
    return hits.length>0&&{t:'⬆️ Progression due next session',b:hits.slice(0,3).join('<br>')};}},
  {id:'plateau',sev:'warn',cd:10,check:s=>{const st=[];for(const[n,h]of Object.entries(s.perLift)){if(h.length<3)continue;const l3=h.slice(-3);
    if(l3.every(x=>x.max===l3[0].max&&x.max>0)&&!progressionAdvice(n,l3[2].target,l3[2].sets))st.push(n);}
-   return st.length>0&&{t:'Plateau watch',b:`${st.map(esc).join(', ')}: three sessions at the same weight without reaching the top of the range. Try micro-loading (2×${EQUIPMENT.microPlateKg} kg plates), a 3-second lowering phase, or swap in a variation for 2–3 weeks.`};}},
+   return st.length>0&&{t:'Plateau watch',b:`${st.map(esc).join(', ')}: three sessions at the same weight without reaching the top of the range. Try micro-loading (2×${EQUIP.microPlateKg} kg plates), a 3-second lowering phase, or swap in a variation for 2–3 weeks.`};}},
  {id:'deload',sev:'info',cd:7,check:s=>s.trainingWeeks>=6&&s.trainingWeeks%6===0&&
    {t:'Deload week',b:`This is training week ${s.trainingWeeks} — your plan calls for a deload every 6th week: cut sets ~40% and load ~10%. It should feel too easy; that's the point. Progress resumes next week.`}},
  {id:'missed',sev:'info',cd:2,check:s=>s.hasWorkouts&&s.missed.length>0&&
    {t:'Missed session this week',b:`No workout logged for ${s.missed.join(' or ')}. Slot it in today or tomorrow — consistency beats perfection, just don't let one miss become two.`}},
+ {id:'water-low',sev:'info',cd:1,check:s=>new Date().getHours()>=15&&s.hasLogs&&s.waterMl<1000&&
+   {t:'💧 Water is behind today',b:`Only ${s.waterMl} ml logged and it's already afternoon — the plan targets ~3 L/day. Thirst often masquerades as hunger on a deficit; get a glass in now and use the +250/+500 buttons as you go.`}},
  {id:'weigh-gap',sev:'info',cd:3,check:s=>s.hasLogs&&(s.sinceWeigh==null||s.sinceWeigh>=4)&&
    {t:'Time for a weigh-in',b:s.sinceWeigh==null?'No weigh-ins yet — daily morning weigh-ins (judged only by the weekly average) are how this plan self-corrects.':`Last weigh-in was ${s.sinceWeigh} days ago. Daily morning weigh-ins keep your weekly average honest.`}},
  {id:'photo-gap',sev:'info',cd:7,check:s=>!!s.lastPhoto&&s.sincePhoto>=16&&
@@ -951,7 +995,7 @@ async function renderToday(){
   let plan='';
   if(planMeals.length){
     const fmap=foodMap(await idbGetAll('foods'));
-    const woKey={Mon:'A',Wed:'B',Fri:'C'}[dayAbbr];
+    const woKey=PROG.days[PROG.schedule[dayAbbr]]?PROG.schedule[dayAbbr]:null;
     let rows='';
     for(const m of planMeals){
       const t=await mealMacros(m,fmap);
@@ -959,10 +1003,20 @@ async function renderToday(){
       rows+=`<div class="entry planrow${done?' done':''}"><div><div class="n">${done?'✓ ':''}${esc(m.name)}</div><div class="s">${esc(m.slot)} · ${rnd(t.kcal)} kcal · ${rnd(t.protein)}P</div></div>${done?'':`<button class="pillbtn" data-logmeal="${m.id}">Log</button>`}</div>`;
     }
     if(woKey&&!wos.length)
-      rows+=`<div class="entry planrow"><div><div class="n">🏋️ ${esc(PROGRAM[woKey].title.split('—')[1]?.trim()||PROGRAM[woKey].title)}</div><div class="s">Training day</div></div><button class="pillbtn" data-startday="${woKey}">Start</button></div>`;
+      rows+=`<div class="entry planrow"><div><div class="n">🏋️ ${esc(PROG.days[woKey].title.split('—')[1]?.trim()||PROG.days[woKey].title)}</div><div class="s">Training day</div></div><button class="pillbtn" data-startday="${woKey}">Start</button></div>`;
     plan=`<div class="card"><div class="meal-h" style="margin-top:0"><span>${DAY_FULL[dayAbbr]}’s plan</span>${woKey?`<span class="badge">🏋️ Day ${woKey}</span>`:`<span class="badge" style="background:var(--soft);color:var(--muted)">Rest day</span>`}</div>${rows}</div>`;
   }
   $('#todayPlan').innerHTML=plan;
+
+  // water tracker for the viewed day
+  const waterMl=(await idbByDate('water',curDate)).reduce((s,w)=>s+w.ml,0);
+  const wPct=Math.min(100,waterMl/WATER_TARGET_ML*100);
+  const litres=(waterMl/1000).toFixed(2).replace(/\.?0+$/,'')||'0';
+  $('#todayWater').innerHTML=`<div class="card" style="padding:12px 16px;margin-bottom:14px"><div class="row between">
+    <div><div class="row" style="gap:7px"><span aria-hidden="true">💧</span><b>${litres} L</b><span class="sm muted">/ ${WATER_TARGET_ML/1000} L</span>${waterMl>=WATER_TARGET_ML?'<span class="badge">✓ done</span>':''}</div>
+      <div style="width:150px;height:7px;background:var(--track);border-radius:6px;overflow:hidden;margin-top:6px"><div style="height:100%;width:${wPct}%;background:var(--f);border-radius:6px;transition:width .3s"></div></div></div>
+    <div class="row" style="gap:6px"><button class="pillbtn" data-water="250">+250</button><button class="pillbtn" data-water="500">+500</button><button class="pillbtn" data-water="undo" aria-label="Undo last water entry">↺</button></div>
+  </div></div>`;
   renderCoach();
 }
 
@@ -1012,7 +1066,8 @@ function openModal(html){const r=$('#modalRoot');
   r.querySelector('.modal-bg').addEventListener('click',e=>{if(e.target.classList.contains('modal-bg'))closeModal();});
   r.querySelectorAll('.x').forEach(b=>b.setAttribute('aria-label','Close'));
   document.body.style.overflow='hidden'; // lock background scroll while the sheet is open
-  const m=r.querySelector('.modal');setTimeout(()=>m&&m.focus(),60);
+  const m=r.querySelector('.modal');
+  setTimeout(()=>{if(m&&!m.contains(document.activeElement))m.focus();},60); // don't steal focus if the user is already typing
 }
 function closeModal(){$('#modalRoot').innerHTML='';document.body.style.overflow='';}
 
@@ -1135,7 +1190,7 @@ async function renderBody(){
   $('#bodyStats').innerHTML=stat;
   drawWeightChart(withW.slice().reverse());
   // list
-  $('#measureList').innerHTML=list.length?list.map(m=>`<div class="card" style="padding:12px 14px"><div class="row between"><div><b>${niceDate(m.date)}</b> <span class="sm muted">${parseD(m.date).toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'})}</span></div><button class="pillbtn" data-delmeas="${m.id}" aria-label="Delete measurement">✕</button></div><div class="sm" style="margin-top:4px">${[m.weight!=null?`⚖️ ${m.weight} kg`:'',m.waist?`📏 waist ${m.waist} cm`:'',m.chest?`chest ${m.chest}`:'',m.arm?`arm ${m.arm}`:'',m.thigh?`thigh ${m.thigh}`:''].filter(Boolean).join(' · ')}</div>${m.notes?`<div class="sm muted" style="margin-top:3px">“${esc(m.notes)}”</div>`:''}</div>`).join(''):'';
+  $('#measureList').innerHTML=list.length?list.map(m=>`<div class="card" style="padding:12px 14px"><div class="row between"><div><b>${niceDate(m.date)}</b> <span class="sm muted">${parseD(m.date).toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'})}</span></div><div class="row" style="gap:7px"><button class="pillbtn" data-editmeas="${m.id}" aria-label="Edit measurement">✎</button><button class="pillbtn" data-delmeas="${m.id}" aria-label="Delete measurement">✕</button></div></div><div class="sm" style="margin-top:4px">${[m.weight!=null?`⚖️ ${m.weight} kg`:'',m.waist?`📏 waist ${m.waist} cm`:'',m.chest?`chest ${m.chest}`:'',m.arm?`arm ${m.arm}`:'',m.thigh?`thigh ${m.thigh}`:''].filter(Boolean).join(' · ')}</div>${m.notes?`<div class="sm muted" style="margin-top:3px">“${esc(m.notes)}”</div>`:''}</div>`).join(''):'';
 }
 function drawWeightChart(data){
   const cv=$('#weightChart'),ctx=cv.getContext('2d');const W=cv.width=cv.clientWidth*2,H=cv.height=480;ctx.scale(1,1);
@@ -1159,19 +1214,21 @@ function drawWeightChart(data){
   pts.forEach((p,i)=>{const x=X(parseD(p.date).getTime()),y=Y(p.weight);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();
   ctx.fillStyle=cssVar('--brand');pts.forEach(p=>{ctx.beginPath();ctx.arc(X(parseD(p.date).getTime()),Y(p.weight),5,0,7);ctx.fill();});
 }
-function addMeasureModal(){
-  openModal(`<div class="mh"><h3>Add measurement</h3><button class="x" onclick="closeModal()">✕</button></div>
-   <label class="fl">Date</label><input id="msDate" type="date" value="${todayStr()}">
-   <div class="in2"><div><label class="fl">Weight (kg)</label><input id="msW" type="number" step="0.1" inputmode="decimal"></div>
-     <div><label class="fl">Waist (cm)</label><input id="msWa" type="number" step="0.1" inputmode="decimal"></div></div>
-   <div class="in3" style="margin-top:0"><div><label class="fl">Chest</label><input id="msCh" type="number" step="0.1" inputmode="decimal"></div>
-     <div><label class="fl">Arm</label><input id="msAr" type="number" step="0.1" inputmode="decimal"></div>
-     <div><label class="fl">Thigh</label><input id="msTh" type="number" step="0.1" inputmode="decimal"></div></div>
-   <label class="fl">Notes</label><textarea id="msN" placeholder="How you feel, energy, sleep…"></textarea>
-   <button class="btn" style="margin-top:14px" id="msSave">Save</button>`);
+async function addMeasureModal(editId){
+  const m=editId?await idbGet('measurements',editId):null;
+  const v=x=>x==null?'':x;
+  openModal(`<div class="mh"><h3>${m?'Edit measurement':'Add measurement'}</h3><button class="x" onclick="closeModal()">✕</button></div>
+   <label class="fl">Date</label><input id="msDate" type="date" value="${m?m.date:todayStr()}">
+   <div class="in2"><div><label class="fl">Weight (kg)</label><input id="msW" type="number" step="0.1" inputmode="decimal" value="${v(m?.weight)}"></div>
+     <div><label class="fl">Waist (cm)</label><input id="msWa" type="number" step="0.1" inputmode="decimal" value="${v(m?.waist)}"></div></div>
+   <div class="in3" style="margin-top:0"><div><label class="fl">Chest</label><input id="msCh" type="number" step="0.1" inputmode="decimal" value="${v(m?.chest)}"></div>
+     <div><label class="fl">Arm</label><input id="msAr" type="number" step="0.1" inputmode="decimal" value="${v(m?.arm)}"></div>
+     <div><label class="fl">Thigh</label><input id="msTh" type="number" step="0.1" inputmode="decimal" value="${v(m?.thigh)}"></div></div>
+   <label class="fl">Notes</label><textarea id="msN" placeholder="How you feel, energy, sleep…">${m?esc(m.notes||''):''}</textarea>
+   <button class="btn" style="margin-top:14px" id="msSave">${m?'Save changes':'Save'}</button>`);
   $('#msSave').onclick=async()=>{const w=$('#msW').value;
-    await idbPut('measurements',{id:uid(),date:$('#msDate').value,weight:w?+w:null,waist:+$('#msWa').value||null,chest:+$('#msCh').value||null,arm:+$('#msAr').value||null,thigh:+$('#msTh').value||null,notes:$('#msN').value.trim()});
-    closeModal();buzz();toast('Measurement saved');renderBody();};
+    await idbPut('measurements',{id:m?m.id:uid(),date:$('#msDate').value,weight:w?+w:null,waist:+$('#msWa').value||null,chest:+$('#msCh').value||null,arm:+$('#msAr').value||null,thigh:+$('#msTh').value||null,notes:$('#msN').value.trim()});
+    closeModal();buzz();toast(m?'Measurement updated':'Measurement saved');renderBody();renderToday();};
 }
 
 /* ============================ PHOTOS ============================ */
@@ -1204,7 +1261,72 @@ function viewPhotoModal(id){idbGet('photos',id).then(p=>{const url=URL.createObj
 
 /* ============================ TRAIN ============================ */
 function renderTrainStart(){
-  $('#dayBtns').innerHTML=Object.entries(PROGRAM).map(([k,v])=>`<button class="btn sec" style="text-align:left" data-startday="${k}">▶︎ ${esc(v.title)}</button>`).join('');
+  $('#dayBtns').innerHTML=Object.entries(PROG.days).map(([k,v])=>
+    `<div class="row" style="gap:8px"><button class="btn sec" style="flex:1;text-align:left" data-startday="${k}">▶︎ ${esc(v.title)}</button><button class="pillbtn" data-editday="${k}" aria-label="Edit ${esc(v.title)}" style="align-self:stretch">✎</button></div>`).join('')
+    +`<div class="btnrow" style="margin-top:6px"><button class="btn ghost sm" data-addday style="width:100%">+ Add day</button><button class="btn ghost sm" id="gymBtn" style="width:100%">🎒 My gym</button></div>`;
+}
+function nextDayKey(){for(const c of 'ABCDEFGH')if(!PROG.days[c])return c;return 'D'+(Object.keys(PROG.days).length+1);}
+async function saveProgram(){await idbPut('kv',{k:'program',v:PROG});}
+
+function editDayModal(key){
+  const isNew=!key;
+  const k=isNew?nextDayKey():key;
+  const day=isNew?{title:'Day '+k+' — Custom',ex:[]}:JSON.parse(JSON.stringify(PROG.days[k]));
+  openModal(`<div class="mh"><h3>${isNew?'New training day':'Edit '+esc(day.title.split('—')[0].trim())}</h3><button class="x" onclick="closeModal()">✕</button></div>
+   <label class="fl">Day title</label><input id="pdTitle" value="${esc(day.title)}">
+   <label class="fl">Scheduled on</label>
+   <div class="row" style="gap:6px;flex-wrap:wrap">${DAY_ORDER.map(a=>`<label class="pillbtn" style="cursor:pointer;display:inline-flex;align-items:center"><input type="checkbox" data-sched="${a}" ${PROG.schedule[a]===k?'checked':''} style="width:auto;margin-right:5px">${a}</label>`).join('')}</div>
+   <label class="fl">Exercises</label>
+   <div id="pdList"></div>
+   <div class="row" style="gap:6px;margin-top:8px">
+     <input id="pdName" placeholder="Exercise name" style="flex:2">
+     <input id="pdTarget" placeholder="e.g. 3 × 8–10" style="flex:1">
+   </div>
+   <div class="row" style="gap:6px;margin-top:6px">
+     <select id="pdType" aria-label="Equipment type" style="flex:1">${EX_TYPES.map(t=>`<option>${t}</option>`).join('')}</select>
+     <button class="btn sm sec" id="pdAdd" style="flex:none">Add</button>
+   </div>
+   ${!isNew&&Object.keys(PROG.days).length>1?`<button class="btn danger sm" id="pdDelete" style="margin-top:12px;width:100%">Delete this day</button>`:''}
+   <button class="btn" style="margin-top:10px" id="pdSave">${isNew?'Create day':'Save changes'}</button>`);
+  const draw=()=>{$('#pdList').innerHTML=day.ex.length?day.ex.map((e,i)=>
+    `<div class="entry"><div><div class="n">${esc(e.name)}</div><div class="s">${esc(e.target)} · ${esc(e.type||'other')}</div></div><div class="row" style="gap:6px">${i>0?`<button class="pillbtn" data-up="${i}" aria-label="Move ${esc(e.name)} up">↑</button>`:''}<button class="pillbtn" data-rm="${i}" aria-label="Remove ${esc(e.name)}">✕</button></div></div>`).join('')
+    :'<p class="sm muted">No exercises yet — add some below.</p>';};
+  draw();
+  $('#pdList').onclick=e=>{
+    const u=e.target.closest('[data-up]');if(u){const i=+u.dataset.up;[day.ex[i-1],day.ex[i]]=[day.ex[i],day.ex[i-1]];draw();return;}
+    const r=e.target.closest('[data-rm]');if(r){day.ex.splice(+r.dataset.rm,1);draw();}};
+  $('#pdAdd').onclick=()=>{const n=$('#pdName').value.trim();if(!n)return toast('Enter an exercise name');
+    day.ex.push({name:n,target:$('#pdTarget').value.trim()||'3 × 8–10',type:$('#pdType').value});
+    $('#pdName').value='';$('#pdTarget').value='';draw();};
+  const del=$('#pdDelete');if(del)del.onclick=async()=>{
+    if(!confirm('Delete this training day? Past logged sessions are kept.'))return;
+    delete PROG.days[k];
+    for(const a of Object.keys(PROG.schedule))if(PROG.schedule[a]===k)delete PROG.schedule[a];
+    await saveProgram();closeModal();renderTrainStart();renderToday();toast('Day deleted');};
+  $('#pdSave').onclick=async()=>{
+    if(!day.ex.length)return toast('Add at least one exercise');
+    day.title=$('#pdTitle').value.trim()||('Day '+k);
+    PROG.days[k]=day;
+    $$('#modalRoot [data-sched]').forEach(c=>{const a=c.dataset.sched;
+      if(c.checked)PROG.schedule[a]=k;
+      else if(PROG.schedule[a]===k)delete PROG.schedule[a];});
+    await saveProgram();closeModal();renderTrainStart();renderToday();toast('Program saved');};
+}
+
+function gymModal(){
+  openModal(`<div class="mh"><h3>🎒 My gym</h3><button class="x" onclick="closeModal()">✕</button></div>
+   <p class="sm muted" style="margin:0 0 4px">The Coach uses this to know when you've maxed a piece of equipment and what to move to next. Bought new kit? Update it here.</p>
+   <label class="fl">Heaviest dumbbell (kg)</label><input id="gyDb" type="number" step="0.5" inputmode="decimal" value="${EQUIP.dbMaxKg}">
+   <label class="fl">Kettlebells (kg, comma-separated)</label><input id="gyKb" value="${EQUIP.kettlebells.join(', ')}">
+   <label class="fl">Smallest plate (kg, for micro-loading)</label><input id="gyMicro" type="number" step="0.25" inputmode="decimal" value="${EQUIP.microPlateKg}">
+   <button class="btn" style="margin-top:14px" id="gySave">Save</button>`);
+  $('#gySave').onclick=async()=>{
+    EQUIP.dbMaxKg=+$('#gyDb').value||EQUIP.dbMaxKg;
+    const kbs=$('#gyKb').value.split(/[,\s]+/).map(Number).filter(n=>n>0).sort((a,b)=>a-b);
+    if(kbs.length)EQUIP.kettlebells=kbs;
+    EQUIP.microPlateKg=+$('#gyMicro').value||EQUIP.microPlateKg;
+    await idbPut('kv',{k:'equipment',v:EQUIP});
+    closeModal();toast('Gym updated');renderCoach();};
 }
 async function renderWorkoutHistory(){
   const list=(await idbGetAll('workouts')).sort((a,b)=>a.date<b.date?1:(a.date>b.date?-1:b.ts-a.ts));
@@ -1212,14 +1334,14 @@ async function renderWorkoutHistory(){
     return `<div class="card sessioncard" role="button" tabindex="0" data-openwo="${w.id}"><div class="row between"><div><b>${esc(w.title.split('—')[0].trim())}</b><div class="sm muted">${niceDate(w.date)} · ${sets} sets · ${rnd(vol)} kg volume</div></div><span class="pillbtn">View ›</span></div></div>`;}).join(''):`<div class="empty"><span class="ic">🏋️</span>No sessions logged yet.</div>`;
 }
 async function startSession(dayKey,existing){
-  const prog=PROGRAM[dayKey];
+  const prog=PROG.days[dayKey];if(!prog)return toast('That training day no longer exists');
   // find last session of this day for prefill
   const all=(await idbGetAll('workouts')).filter(w=>w.dayKey===dayKey&&(!existing||w.id!==existing.id)).sort((a,b)=>a.date<b.date?1:-1);
   const last=all[0];
   const lastMap={};if(last)last.exercises.forEach(e=>lastMap[e.name]=e.sets);
   let session=existing||{id:uid(),date:todayStr(),dayKey,title:prog.title,notes:'',ts:Date.now(),
-    exercises:prog.ex.map(([name,tgt])=>{const prev=lastMap[name];const n=prev?prev.length:parseInt(tgt)||3;
-      return{name,target:tgt,sets:Array.from({length:n},(_,i)=>({weight:prev&&prev[i]?prev[i].weight:'',reps:''}))};})};
+    exercises:prog.ex.map(e=>{const prev=lastMap[e.name];const n=prev?prev.length:parseInt(e.target)||3;
+      return{name:e.name,target:e.target,sets:Array.from({length:n},(_,i)=>({weight:prev&&prev[i]?prev[i].weight:'',reps:''}))};})};
   drawSession(session,lastMap);
 }
 function drawSession(session,lastMap){
@@ -1295,7 +1417,7 @@ function settingsModal(){
   $('#stExport').onclick=exportData;
   $('#stImport').onclick=()=>$('#stFile').click();
   $('#stFile').onchange=importData;
-  $('#stClear').onclick=async()=>{if(!confirm('Erase ALL data on this device? This cannot be undone.'))return;for(const s of ['log','measurements','photos','workouts','foods','meals','kv']){await new Promise(r=>{const req=DB.transaction(s,'readwrite').objectStore(s).clear();req.onsuccess=r;req.onerror=r;});}await seedIfEmpty();await loadSettings();closeModal();toast('All data erased');go('today');};
+  $('#stClear').onclick=async()=>{if(!confirm('Erase ALL data on this device? This cannot be undone.'))return;for(const s of ['log','measurements','photos','workouts','water','foods','meals','kv']){await new Promise(r=>{const req=DB.transaction(s,'readwrite').objectStore(s).clear();req.onsuccess=r;req.onerror=r;});}await seedIfEmpty();await loadSettings();await loadProgram();closeModal();toast('All data erased');go('today');};
 }
 async function exportData(){
   const data={version:1,exportedAt:new Date().toISOString(),
@@ -1303,7 +1425,7 @@ async function exportData(){
     kv:(await idbGetAll('kv')).filter(r=>r.k!=='tombstones').map(r=>r.k==='settings'?{...r,aiKey:undefined,sync:undefined}:r),
     foods:(await idbGetAll('foods')).filter(f=>f.custom),
     meals:(await idbGetAll('meals')).filter(m=>m.custom),
-    log:await idbGetAll('log'),measurements:await idbGetAll('measurements'),workouts:await idbGetAll('workouts')};
+    log:await idbGetAll('log'),measurements:await idbGetAll('measurements'),workouts:await idbGetAll('workouts'),water:await idbGetAll('water')};
   // photos as base64
   const photos=await idbGetAll('photos');data.photos=[];
   for(const p of photos){data.photos.push({...p,blob:await blobToB64(p.blob)});}
@@ -1326,8 +1448,9 @@ async function importData(e){const file=e.target.files[0];if(!file)return;try{co
   for(const r of d.log||[])await idbPut('log',r);
   for(const r of d.measurements||[])await idbPut('measurements',r);
   for(const r of d.workouts||[])await idbPut('workouts',r);
+  for(const r of d.water||[])await idbPut('water',r);
   for(const p of d.photos||[])await idbPut('photos',{...p,blob:typeof p.blob==='string'?b64ToBlob(p.blob):p.blob});
-  await loadSettings();closeModal();toast('Backup restored');go('today');}catch(err){toast('Could not read file');}}
+  await loadSettings();await loadProgram();closeModal();toast('Backup restored');go('today');}catch(err){toast('Could not read file');}}
 
 /* ============================ Navigation ============================ */
 function go(view){
@@ -1359,6 +1482,10 @@ document.addEventListener('click',async e=>{
   const lf=t.closest('[data-logfood]');if(lf){logFoodModal(lf.dataset.logfood);return;}
   const lm=t.closest('[data-logmeal]');if(lm){logMealModal(lm.dataset.logmeal);return;}
   const dl=t.closest('[data-dellog]');if(dl){await idbDel('log',dl.dataset.dellog);renderToday();return;}
+  const wa=t.closest('[data-water]');if(wa){
+    if(wa.dataset.water==='undo'){const list=(await idbByDate('water',curDate)).sort((a,b)=>b.ts-a.ts);if(list[0])await idbDel('water',list[0].id);}
+    else await idbPut('water',{id:uid(),date:curDate,ml:+wa.dataset.water,ts:Date.now()});
+    renderToday();return;}
   const di=t.closest('[data-dismissinsight]');if(di){
     const rec=(await idbGet('kv','insightDismissals'))||{k:'insightDismissals',v:{}};
     rec.v[di.dataset.dismissinsight]=todayStr();await idbPut('kv',rec);renderCoach();return;}
@@ -1367,9 +1494,13 @@ document.addEventListener('click',async e=>{
     if(!prev.length){toast('Nothing logged on '+niceDate(prevDay));return;}
     for(const en of prev)await idbPut('log',{...en,id:uid(),date:curDate,ts:Date.now()});
     buzz();toast(`Copied ${prev.length} item${prev.length>1?'s':''} from ${niceDate(prevDay)}`);renderToday();return;}
+  const eme=t.closest('[data-editmeas]');if(eme){addMeasureModal(eme.dataset.editmeas);return;}
   const dme=t.closest('[data-delmeas]');if(dme){if(confirm('Delete measurement?')){await idbDel('measurements',dme.dataset.delmeas);renderBody();}return;}
   const ph=t.closest('[data-photo]');if(ph){viewPhotoModal(ph.dataset.photo);return;}
   const dp=t.closest('[data-delphoto]');if(dp){await idbDel('photos',dp.dataset.delphoto);closeModal();renderPhotos();return;}
+  const edd=t.closest('[data-editday]');if(edd){editDayModal(edd.dataset.editday);return;}
+  if(t.closest('[data-addday]')){editDayModal(null);return;}
+  if(t.closest('#gymBtn')){gymModal();return;}
   const sd=t.closest('[data-startday]');if(sd){startSession(sd.dataset.startday);return;}
   const ow=t.closest('[data-openwo]');if(ow){openWorkout(ow.dataset.openwo);return;}
   if(t.closest('#helpBtn')){go('plan');return;}
@@ -1395,6 +1526,9 @@ window.closeModal=closeModal;
 const MEAL_SEED_VERSION=2;
 async function seedIfEmpty(){
   const f=await idbGetAll('foods');if(!f.length)for(const x of SEED_FOODS)await idbPut('foods',x);
+  // program & equipment: seed once, then they're user data (edited in-app, synced)
+  if(!await idbGet('kv','program'))await idbPut('kv',{k:'program',v:DEFAULT_PROGRAM});
+  if(!await idbGet('kv','equipment'))await idbPut('kv',{k:'equipment',v:DEFAULT_EQUIPMENT});
   // Versioned meal seed: refresh the built-in plan meals while keeping your own custom meals.
   const ver=(await idbGet('kv','mealSeedVersion'))?.v||0;
   if(ver<MEAL_SEED_VERSION){
@@ -1405,7 +1539,7 @@ async function seedIfEmpty(){
   }
 }
 (async function init(){
-  await openDB();await seedIfEmpty();await loadSettings();
+  await openDB();await seedIfEmpty();await loadSettings();await loadProgram();
   applyTheme();
   if(syncConfigured()&&navigator.onLine)syncNow().then(n=>{if(n)go(curView);}).catch(()=>{});
   $('#calTarget').textContent=SET.targets.kcal;
