@@ -42,7 +42,9 @@ explicitly asks and accepts that it introduces a build step and breaks the
 
 ```
 fittrack/
-├── index.html          ← THE APP. All HTML, CSS (<style>), and JS (<script>).
+├── index.html          ← THE APP. All HTML, SVG icon sprite, and JS (<script>).
+├── styles.css          ← The entire design system ("Athletic Dark" — see §7).
+├── fonts/              ← Self-hosted Barlow Condensed woff2 (display numerals).
 ├── manifest.json       ← PWA manifest (name, icons, theme, display:standalone).
 ├── service-worker.js   ← Offline cache of the app shell. Has a CACHE version const.
 ├── icon-192.png        ← PWA icons (barbell glyph on green gradient).
@@ -248,12 +250,24 @@ on next launch.
 
 ## 7. Styling / design system
 
-All styling is a `<style>` block in `index.html` using **CSS custom properties**
-defined in `:root`. The palette is a deep teal-green brand:
-- `--brand:#1f7a63`, `--brand-d:#155a49`, `--brand-soft:#e6f2ee`
-- macro accents: `--p` (protein, green), `--c` (carbs, ochre `#c0743b`),
-  `--f` (fat, blue `#3a6ea5`)
-- neutrals: `--bg`, `--card`, `--ink`, `--muted`, `--line`, plus `--shadow`.
+All styling lives in **`styles.css`** (hand-written, zero dependencies, no
+build step). The design system is **"Athletic Dark"** (chosen by the user,
+2026-07-28): dark-first graphite surfaces with a volt accent, condensed
+display numerals, glass header/nav, SVG icon sprite (in `index.html`
+`<defs>`), and a desktop app-frame (≥940px: sidebar nav + Today dashboard
+grid via `.tgrid`/`.tcol-a`/`.tcol-b`).
+
+- Core tokens: `--bg #0B0D0C`, `--card`, `--line`, `--ink`, `--muted`,
+  **`--volt #D6F62F`** (accent; `--brand` aliases it — chart/ring read
+  `--brand` via `cssVar()`), macro accents `--p` volt / `--c` amber
+  `#FFB224` / `--f` cyan `#4CC3FF`, `--good`, `--danger`, `--glow`.
+- Light theme via `:root[data-theme="light"]` overrides (dark is default;
+  `SET.theme` defaults to `'dark'`).
+- Display font: self-hosted **Barlow Condensed** (`fonts/*.woff2`,
+  `--font-display`) for headings/numerals.
+- **The class contract is stable**: JS templates and tests depend on class
+  *names* (`.card`, `.btn`, `.foodrow`, `.insight`, `.chip`…), never on
+  their looks. Restyle in `styles.css`; don't rename classes casually.
 
 Component classes to reuse: `.card`, `.btn` (`.sec`/`.ghost`/`.danger`/`.sm`),
 `.seg` (segmented control), `.foodrow`, `.entry`, `.modal`/`.modal-bg`,

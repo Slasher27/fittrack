@@ -3,6 +3,9 @@ const CACHE = 'fittrack-v5';
 const ASSETS = [
   './',
   './index.html',
+  './styles.css',
+  './fonts/BarlowCondensed-600.woff2',
+  './fonts/BarlowCondensed-700.woff2',
   './manifest.json',
   './icon-192.png',
   './icon-512.png',
