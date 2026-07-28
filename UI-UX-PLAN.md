@@ -198,6 +198,129 @@ flows working, no console errors.
 
 ---
 
+## Smart coach plan — insights, nudges & adaptation (agreed 2026-07-28, not started)
+
+Goal: the app should notice things and guide, not just record — e.g. "your
+dumbbell curls are at the 10 kg ceiling, switch to bar/bands", "you're
+averaging +180 kcal over target this week", "no water logged today",
+"weight stalled 2 weeks → apply the plan's adjustment rule".
+
+**Architecture principle:** a *local, deterministic rules engine* is the
+brain (works fully offline, free, private — all the data already lives in
+IndexedDB). The AI is an optional narrator/advisor layered on top via the
+existing API-key infrastructure. True push notifications need a backend, so
+notification scope is limited to what a PWA can honestly do (see Phase C).
+
+### Phase A — insights engine + feed — [x] SHIPPED (2026-07-28)
+
+Implemented as designed, plus the user's additions (goal-triggered
+adaptation, in-workout prescriptions, plateau handling):
+
+- `computeStats()` aggregates all stores; `INSIGHT_RULES` (13 rules) +
+  `renderCoach()` render a dismissible 🧠 Coach card at the top of Today
+  (severity-sorted, per-rule cooldowns, dismissals in `kv`).
+- **Personal-trainer moments:** progression prescriptions also appear
+  *inside the workout logger* next to each exercise's "Last:" line
+  (`progressionAdvice()` — double progression automated, with equipment-
+  aware advice from the new `EQUIPMENT` const: DB 10 kg ceiling → bar/bands,
+  KB ladder 12→16→20→24→32, micro-plate suggestions on plateaus).
+- **Goal-reached adaptation:** at goal weight the Coach prescribes the
+  plan's reverse-diet + strength-focus shift.
+- Verified by 13 seeded-scenario headless checks (stall, kcal/protein
+  drift, plateau vs progression, DB ceiling, dismissal persistence,
+  in-modal ↑ hints). Covered by pending `fittrack-v4` bump.
+- **"Self-learning" note:** true self-learning isn't possible in a static
+  offline app; the honest equivalents are (a) this rules engine encoding
+  the plan's evidence base, and (b) Phase D's AI layer, which can bring
+  current science via the API. A future "evidence refresh" prompt (ask
+  Claude to critique the program against the user's logged results) is the
+  practical form of "informing of better methods" — added to Phase D scope.
+
+Original Phase A design (for reference):
+
+- `computeStats()`: one aggregator over existing stores → rolling 7/14-day
+  kcal & protein averages, weekly weight averages & trend, days since last
+  weigh-in/photo/workout, per-exercise history (weight × reps per session),
+  current training week number.
+- `INSIGHT_RULES`: array of pure rules `{id, check(stats), message, severity,
+  cooldownDays}`. Initial catalog:
+  - **Adjustment rule** (plan §7 automated): stalled 2–3 wks → suggest
+    −150 kcal *or* +1,500 steps; losing >0.7 kg/wk → +150 kcal back;
+    on-pace → affirmation.
+  - **Calorie drift**: 7-day avg >~10% over/under target.
+  - **Protein shortfall**: multiple days materially under 180 g.
+  - **Double progression prompt**: all sets at top of rep range last session
+    → "add +2.5–5 kg (lower) / +1.25–2.5 kg (upper) next time".
+  - **Plateau**: same weight ≥3 sessions on a main lift.
+  - **Equipment ceiling** (uses new `EQUIPMENT` const from the owner's
+    inventory): e.g. DB work capped at 10 kg → suggest band/barbell swap;
+    pulley is high-to-low only.
+  - **Deload**: every 6th training week.
+  - **Consistency**: missed Mon/Wed/Fri session, no weigh-in ≥4 days,
+    no progress photo ≥16 days.
+- **Insights card on Today** (top, below plan card): severity-tinted rows,
+  dismissible; dismissals stored in `kv` with per-rule cooldowns so nothing
+  nags. Highlight count on the 🏠 tab badge (optional).
+
+### Phase B — water tracking (enables hydration insights)
+
+- Quick-add buttons on Today (+250/+500 ml), daily total vs 3 L plan target.
+- Needs a new `water` object store → **IndexedDB version bump to 2** with
+  migration in `onupgradeneeded` (first DB migration — follow CLAUDE.md §5
+  care; export/import must include the new store).
+- Hydration rules: "under 1 L by mid-afternoon", "daily target met ✓".
+
+### Phase C — notifications (honest PWA limits)
+
+- Settings toggle → Notifications API permission.
+- On-launch local notifications for high-severity insights (works everywhere
+  once the app is opened).
+- Android/Chrome installed-PWA extras (best-effort): Periodic Background
+  Sync to surface reminders (Mon/Wed/Fri workout nudge, evening log
+  reminder) without the app open. **iOS cannot do background notifications
+  without a push server** — document in-app; a push backend stays an
+  explicit opt-in future decision (roadmap #6 territory).
+
+### Phase D — AI coach (optional layer, existing key infra)
+
+- **Weekly coach report**: one tap (or auto on Sundays) sends the computed
+  stats + fired insights to Claude → personalized narrative: what worked,
+  what to adapt, next week's focus. Cached locally; graceful offline.
+- **Data-aware Ask box** (opt-in toggle): include a compact recent-stats
+  summary with plan questions so answers reference *actual* progress, not
+  just the plan. Clearly labelled since it sends logged data to the API.
+
+### Phase E — data-driven program & equipment (agreed 2026-07-28, not started)
+
+User need: change/dislike a workout, or buy new equipment, **without code
+changes**. Same seed-vs-custom pattern already proven with meals.
+
+- **Program becomes data**: move `PROGRAM` into the `kv` store with a
+  versioned seed (`programSeedVersion`, mirrors `MEAL_SEED_VERSION`).
+  Program editor in the Train tab: rename days, add/remove/reorder
+  exercises, edit target rep schemes, add extra days, change which weekdays
+  map to which day. `startSession`/`renderTrainStart`/Today's training chip
+  read stored program. History (`workouts` store) untouched — prefill still
+  matches by exercise name.
+- **Exercise typing for Coach smarts**: each exercise gets an equipment
+  `type` (barbell-lower / barbell-upper / dumbbell / kettlebell /
+  bodyweight+belt / band / time) — seeded for the stock program, pickable
+  for custom exercises — so `progressionAdvice()` keeps prescribing correct
+  increments for exercises the user invents.
+- **Equipment registry**: `EQUIPMENT` const → editable "My gym" record
+  (dumbbell max, kettlebell sizes, plate inventory, micro-plates, bands,
+  pulley capability). Editing it immediately re-tunes ceiling/progression
+  advice — buy 12.5 kg dumbbells, log them, DB ceiling warnings move.
+- **AI program revision (extends Phase D)**: "I don't like Day B" → Claude
+  gets goals + equipment registry + training history, returns a revised
+  program as structured JSON the app previews and applies on confirmation.
+  The app updates itself; no code changes.
+
+Order: A ✅ → E and B next (either order) → C → D. A alone delivers most of
+the perceived intelligence. Ship rules: SW cache bump per deploy; DB version
+bump in Phase B only. Phase E is backend-independent (works in vanilla,
+unaffected by the Path A/B sync decision).
+
 ## Explicitly rejected (don't revisit without new reasons)
 
 - Swipeable tab gestures — conflicts with scroll and the browser/PWA
@@ -213,6 +336,7 @@ flows working, no console errors.
 | Date | Session summary |
 |---|---|
 | 2026-07-28 | Scanned codebase, agreed enhancement plan (this document). Batch 1 scope confirmed: Today's-plan card, recent foods + repeat-yesterday, dark mode, motion pass. No code changes yet. |
+| 2026-07-28 | **Smart Coach Phase A shipped.** 🧠 Coach card on Today: 13-rule insights engine over local data (weight adjustment rules, calorie/protein drift, double-progression prompts, plateau watch, equipment ceilings, deload, consistency nudges, goal-reached adaptation) with dismissals + cooldowns; ↑ progression prescriptions inside the workout logger. 13 seeded-scenario checks passing. Next: Phase B (water), C (notifications), D (AI coach + evidence refresh). Architecture question raised (Svelte/shadcn/SQLite) — decision: stay vanilla; revisit only if cloud sync (roadmap #6) or file size becomes unmanageable. |
 | 2026-07-28 | **Meal editing + mobile/a11y audit.** ✎ edit for all meals (plan meals convert to custom copies in-slot), hover/cursor/chevron affordance on clickable rows, fixed latent delete-✕-opens-modal bug. Full audit applied: pinch-zoom re-enabled, dialog semantics + Escape + focus + scroll-lock on modals, keyboard-activatable rows, aria labels/landmarks/alt text/live toasts, contrast + tap-target bumps. 27 automated checks passing at 320px & 390px. Backlog captured under "Mobile responsiveness & accessibility audit". Still within the pending `fittrack-v4` bump. |
 | 2026-07-28 | **Desktop modal polish** (user-reported on the deployed Netlify site): thin themed scrollbar on `.modal` (light+dark, rounded thumb, track inset from the rounded corners), desktop modals narrowed to 520px max-width / 86vh, number-input spinners hidden. Also security fix: backup export strips `aiKey`; restore preserves the on-device key. Covered by the pending `fittrack-v4` bump. |
 | 2026-07-28 | **Plan reference + AI assistant shipped** (user request, outside original batches — see "Shipped outside the original batches"). Original coaching doc dissected into a 📖 Plan view (8 accordion sections) with an Ask box: Claude API answers when a key is set (Settings) + online, local plan search otherwise. SW cache → `fittrack-v4`. 16 mocked-API headless checks passing. Real-API call still to be verified by the user with their own key. |

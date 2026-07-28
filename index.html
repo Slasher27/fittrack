@@ -163,6 +163,13 @@
   .toast{position:fixed;left:50%;bottom:calc(var(--nav-h) + 16px);transform:translateX(-50%);background:var(--toast-bg);color:var(--toast-ink);padding:11px 18px;border-radius:12px;font-size:13.5px;font-weight:600;z-index:80;box-shadow:0 6px 20px rgba(0,0,0,.25);opacity:0;transition:opacity .25s,transform .25s;pointer-events:none}
   .toast.show{opacity:1;transform:translateX(-50%) translateY(-4px)}
   a{color:var(--brand)}
+  /* coach insights */
+  .insight{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding:9px 11px;border-left:3px solid var(--muted);background:var(--soft);border-radius:0 10px 10px 0;margin-bottom:8px}
+  .insight:last-child{margin-bottom:0}
+  .insight.warn{border-color:var(--c)}
+  .insight.good{border-color:var(--good)}
+  .insight .n{font-size:13.5px;font-weight:700}
+  .insight .s{font-size:12.5px;color:var(--muted);margin-top:2px;line-height:1.45}
   /* plan / help view */
   .plansec{background:var(--card);border:1px solid var(--line);border-radius:14px;margin-bottom:10px;box-shadow:var(--shadow);overflow:hidden}
   .plansec summary{padding:13px 16px;font-weight:750;font-size:14.5px;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:10px}
@@ -244,6 +251,7 @@
     <button class="qbtn" data-quick="train"><span class="ic">🏋️</span>Workout</button>
   </div>
 
+  <div id="todayCoach"></div>
   <div id="todayPlan"></div>
   <div id="todaySummary"></div>
   <div id="todayFood"></div>
@@ -723,6 +731,109 @@ function foodMap(list){const m={};for(const f of list)m[f.id]=f;return m;}
 function scale(food,servings){return{kcal:food.kcal*servings,protein:food.protein*servings,carbs:food.carbs*servings,fat:food.fat*servings};}
 async function mealMacros(meal,fmap){fmap=fmap||foodMap(await idbGetAll('foods'));let t={kcal:0,protein:0,carbs:0,fat:0};for(const it of meal.items){const f=fmap[it.foodId];if(!f)continue;const s=scale(f,it.servings);for(const k in t)t[k]+=s[k];}return t;}
 
+/* ============================ COACH (insights engine) ============================ */
+/* Deterministic personal-trainer rules over local data. Offline, private, free. */
+const EQUIPMENT={dbMaxKg:10,kettlebells:[12,16,20,24,32],barKg:20,plateKg:162.5,microPlateKg:1.25,pulley:'high-to-low only'};
+const LOWER_LIFTS=new Set(['Back Squat','Front Squat','Deadlift','Romanian Deadlift','Hip Thrust']);
+const DB_LIFTS=new Set(['DB Curl','Lateral Raise']);
+
+function repTop(t){ // top of the rep range from a target like '3 × 6–8'; null for AMRAP/time/rounds
+  if(!t||/amrap|round|min/i.test(t))return null;
+  const r=t.match(/(\d+)\s*[–-]\s*(\d+)/);if(r)return +r[2];
+  const m=t.match(/×\s*(\d+)\b(?!\s*s)/);return m?+m[1]:null;
+}
+function progressionAdvice(name,target,sets){ // double progression: all sets at top of range → load up
+  const top=repTop(target);if(!top)return null;
+  const done=(sets||[]).filter(s=>+s.reps>0);if(!done.length)return null;
+  if(!done.every(s=>+s.reps>=top))return null;
+  const w=Math.max(...done.map(s=>+s.weight||0));
+  if(DB_LIFTS.has(name)){
+    if(w>=EQUIPMENT.dbMaxKg)return `you've maxed your ${EQUIPMENT.dbMaxKg} kg dumbbells — switch to the barbell or bands to keep progressing`;
+    return 'all sets at the top — move up to the next dumbbell';
+  }
+  if(/^KB\b|Swings/.test(name)){
+    const next=EQUIPMENT.kettlebells.find(k=>k>w);
+    return next?`all sets at the top — move up to the ${next} kg bell`:`you've maxed the 32 kg bell — add reps or slow the tempo`;
+  }
+  return `all sets hit ${top} reps — add ${LOWER_LIFTS.has(name)?'2.5–5':'1.25–2.5'} kg and restart at the bottom of the range`;
+}
+
+async function computeStats(){
+  const[logs,meas,wos,photos]=await Promise.all([idbGetAll('log'),idbGetAll('measurements'),idbGetAll('workouts'),idbGetAll('photos')]);
+  const dayTotals={};logs.forEach(e=>{const d=dayTotals[e.date]=dayTotals[e.date]||{kcal:0,protein:0};d.kcal+=e.kcal;d.protein+=e.protein;});
+  const dayOff=n=>{const d=new Date();d.setDate(d.getDate()-n);return dstr(d);};
+  const days7=[];for(let i=1;i<=7;i++){const ds=dayOff(i);if(dayTotals[ds])days7.push(ds);} // logged days only; today excluded (incomplete)
+  const kcal7=days7.length?days7.reduce((s,d)=>s+dayTotals[d].kcal,0)/days7.length:null;
+  const protLow=days7.filter(d=>dayTotals[d].protein<SET.targets.protein*0.85).length;
+  const w=meas.filter(m=>m.weight!=null).sort((a,b)=>a.date<b.date?-1:1);
+  const mean=a=>a.length?a.reduce((s,m)=>s+m.weight,0)/a.length:null;
+  const wk1=w.filter(m=>m.date>=dayOff(7)),wk2=w.filter(m=>m.date>=dayOff(14)&&m.date<dayOff(7));
+  const trend=wk1.length>=2&&wk2.length>=2?mean(wk1)-mean(wk2):null; // kg/week; negative = losing
+  const lastWeigh=w[w.length-1]||null;
+  const since=ds=>ds?Math.round((parseD(todayStr())-parseD(ds))/864e5):null;
+  const lastPhoto=photos.map(p=>p.date).sort().pop()||null;
+  const sorted=wos.slice().sort((a,b)=>a.date<b.date?-1:1);
+  const perLift={};
+  sorted.forEach(wo=>wo.exercises.forEach(ex=>{const done=ex.sets.filter(s=>+s.reps>0);if(!done.length)return;
+    (perLift[ex.name]=perLift[ex.name]||[]).push({date:wo.date,target:ex.target,sets:done,max:Math.max(...done.map(s=>+s.weight||0))});}));
+  const weekKey=d=>{const x=parseD(d);x.setDate(x.getDate()-((x.getDay()+6)%7));return dstr(x);};
+  const trainingWeeks=new Set(sorted.map(wo=>weekKey(wo.date))).size;
+  const today=parseD(todayStr());const monOff=(today.getDay()+6)%7;
+  const doneDates=new Set(sorted.map(wo=>wo.date));
+  const missed=[];[['Monday',0],['Wednesday',2],['Friday',4]].forEach(([n,off])=>{
+    if(off<monOff){const d=new Date(today);d.setDate(d.getDate()-monOff+off);if(!doneDates.has(dstr(d)))missed.push(n);}});
+  return{days7,kcal7,protLow,trend,lastWeigh,sinceWeigh:since(lastWeigh&&lastWeigh.date),lastPhoto,sincePhoto:since(lastPhoto),
+    perLift,trainingWeeks,missed,hasWorkouts:sorted.length>0,hasLogs:logs.length>0};
+}
+
+/* Each rule: check(stats) → false | {t: title, b: body(html-safe)} */
+const INSIGHT_RULES=[
+ {id:'goal-reached',sev:'good',cd:30,check:s=>!!(s.lastWeigh&&SET.startWeight>SET.goalWeight&&s.lastWeigh.weight<=SET.goalWeight)&&
+   {t:'🎉 Goal weight reached — time to adapt the plan',b:`You weighed in at ${s.lastWeigh.weight} kg — at your ${SET.goalWeight} kg goal. Per your plan: raise calories ~100 kcal/week back toward maintenance (~2,450) and shift the goal to building strength. Update your targets in ⚙️ Settings when ready.`}},
+ {id:'weight-fast',sev:'warn',cd:10,check:s=>s.trend!=null&&s.trend<=-0.7&&
+   {t:'Losing faster than ~0.7 kg/week',b:`Your weekly average dropped ${(-s.trend).toFixed(1)} kg. That pace costs muscle — add ~150 kcal back (carbs or fat) and keep protein at ${SET.targets.protein} g.`}},
+ {id:'weight-stall',sev:'warn',cd:14,check:s=>s.trend!=null&&Math.abs(s.trend)<0.15&&s.lastWeigh&&s.lastWeigh.weight>SET.goalWeight+0.5&&
+   {t:'Weight has stalled for ~2 weeks',b:'Your plan’s adjustment rule: drop ~150 kcal/day (trim carbs or fat — never protein) <i>or</i> add ~1,500 daily steps. Change one lever, then reassess in 2 weeks.'}},
+ {id:'weight-pace',sev:'good',cd:7,check:s=>s.trend!=null&&s.trend<=-0.25&&s.trend>=-0.65&&
+   {t:'Fat loss is on pace 👌',b:`Weekly average down ${(-s.trend).toFixed(1)} kg — right in the 0.3–0.5 kg sweet spot that preserves muscle. Change nothing.`}},
+ {id:'kcal-over',sev:'warn',cd:5,check:s=>s.days7.length>=4&&s.kcal7>SET.targets.kcal*1.08&&
+   {t:'Calories are drifting over target',b:`You've averaged ${rnd(s.kcal7)} kcal over your last ${s.days7.length} logged days vs the ${SET.targets.kcal} target. Trim carbs or fats first — protein stays untouched.`}},
+ {id:'kcal-under',sev:'warn',cd:5,check:s=>s.days7.length>=4&&s.kcal7<SET.targets.kcal*0.8&&
+   {t:'Eating well under target',b:`Averaging ${rnd(s.kcal7)} kcal — a much bigger deficit than planned strips muscle and tanks training. Eat closer to ${SET.targets.kcal}; faster isn't better.`}},
+ {id:'protein-low',sev:'warn',cd:5,check:s=>s.protLow>=3&&
+   {t:'Protein is falling short',b:`${s.protLow} of your last ${s.days7.length} logged days were under ~${rnd(SET.targets.protein*0.85)} g. Protein is the non-negotiable — anchor every meal at 40–45 g (whey, biltong and eggs are the quick fixes).`}},
+ {id:'progress',sev:'good',cd:3,check:s=>{const hits=[];for(const[n,h]of Object.entries(s.perLift)){const last=h[h.length-1];const a=progressionAdvice(n,last.target,last.sets);if(a)hits.push(`<b>${esc(n)}</b> — ${esc(a)}`);}
+   return hits.length>0&&{t:'⬆️ Progression due next session',b:hits.slice(0,3).join('<br>')};}},
+ {id:'plateau',sev:'warn',cd:10,check:s=>{const st=[];for(const[n,h]of Object.entries(s.perLift)){if(h.length<3)continue;const l3=h.slice(-3);
+   if(l3.every(x=>x.max===l3[0].max&&x.max>0)&&!progressionAdvice(n,l3[2].target,l3[2].sets))st.push(n);}
+   return st.length>0&&{t:'Plateau watch',b:`${st.map(esc).join(', ')}: three sessions at the same weight without reaching the top of the range. Try micro-loading (2×${EQUIPMENT.microPlateKg} kg plates), a 3-second lowering phase, or swap in a variation for 2–3 weeks.`};}},
+ {id:'deload',sev:'info',cd:7,check:s=>s.trainingWeeks>=6&&s.trainingWeeks%6===0&&
+   {t:'Deload week',b:`This is training week ${s.trainingWeeks} — your plan calls for a deload every 6th week: cut sets ~40% and load ~10%. It should feel too easy; that's the point. Progress resumes next week.`}},
+ {id:'missed',sev:'info',cd:2,check:s=>s.hasWorkouts&&s.missed.length>0&&
+   {t:'Missed session this week',b:`No workout logged for ${s.missed.join(' or ')}. Slot it in today or tomorrow — consistency beats perfection, just don't let one miss become two.`}},
+ {id:'weigh-gap',sev:'info',cd:3,check:s=>s.hasLogs&&(s.sinceWeigh==null||s.sinceWeigh>=4)&&
+   {t:'Time for a weigh-in',b:s.sinceWeigh==null?'No weigh-ins yet — daily morning weigh-ins (judged only by the weekly average) are how this plan self-corrects.':`Last weigh-in was ${s.sinceWeigh} days ago. Daily morning weigh-ins keep your weekly average honest.`}},
+ {id:'photo-gap',sev:'info',cd:7,check:s=>!!s.lastPhoto&&s.sincePhoto>=16&&
+   {t:'Progress photo due',b:'It’s been over two weeks — same light, same pose, front/side/back. Photos catch the recomposition the scale hides.'}},
+];
+
+async function renderCoach(){
+  const s=await computeStats();
+  const dis=(await idbGet('kv','insightDismissals'))?.v||{};
+  const fired=[];
+  for(const r of INSIGHT_RULES){
+    let res;try{res=r.check(s);}catch(err){continue;}
+    if(!res)continue;
+    const d=dis[r.id];
+    if(d&&(parseD(todayStr())-parseD(d))/864e5<r.cd)continue;
+    fired.push({id:r.id,sev:r.sev,...res});
+  }
+  const order={warn:0,good:1,info:2};fired.sort((a,b)=>order[a.sev]-order[b.sev]);
+  $('#todayCoach').innerHTML=fired.length?`<div class="card"><div class="meal-h" style="margin-top:0"><span>🧠 Coach</span><span class="badge">${fired.length}</span></div>${
+    fired.slice(0,4).map(i=>`<div class="insight ${i.sev}"><div><div class="n">${i.t}</div><div class="s">${i.b}</div></div><button class="pillbtn" data-dismissinsight="${i.id}" aria-label="Dismiss insight">✕</button></div>`).join('')
+  }${fired.length>4?`<div class="xs muted center" style="margin-top:6px">+${fired.length-4} more after these are handled</div>`:''}</div>`:'';
+}
+
 /* ============================ TODAY ============================ */
 async function renderToday(){
   $('#dayLabel').textContent=niceDate(curDate);
@@ -781,6 +892,7 @@ async function renderToday(){
     plan=`<div class="card"><div class="meal-h" style="margin-top:0"><span>${DAY_FULL[dayAbbr]}’s plan</span>${woKey?`<span class="badge">🏋️ Day ${woKey}</span>`:`<span class="badge" style="background:var(--soft);color:var(--muted)">Rest day</span>`}</div>${rows}</div>`;
   }
   $('#todayPlan').innerHTML=plan;
+  renderCoach();
 }
 
 /* ============================ FOOD ============================ */
@@ -1043,8 +1155,9 @@ function drawSession(session,lastMap){
   const body=session.exercises.map((ex,ei)=>{
     const last=lastMap&&lastMap[ex.name];
     const lastTxt=last&&last.some(s=>s.weight||s.reps)?`Last: ${last.map(s=>`${s.weight||'–'}×${s.reps||'–'}`).join(', ')}`:'';
+    const adv=last?progressionAdvice(ex.name,ex.target,last):null;
     return `<div data-ex="${ei}"><div class="exhead"><span class="en">${esc(ex.name)}</span><span class="et">target ${esc(ex.target)}</span></div>
-      ${lastTxt?`<div class="lasthint">${esc(lastTxt)}</div>`:''}
+      ${lastTxt?`<div class="lasthint">${esc(lastTxt)}${adv?` — <b>↑ ${esc(adv)}</b>`:''}</div>`:''}
       <div class="setrow" style="color:var(--muted);font-size:11px;font-weight:700"><span class="si">#</span><span>KG</span><span>REPS</span><span></span></div>
       <div class="sets">${ex.sets.map((s,si)=>setRow(ei,si,s)).join('')}</div>
       <button class="addset" data-addset="${ei}">+ set</button></div>`;
@@ -1155,6 +1268,9 @@ document.addEventListener('click',async e=>{
   const lf=t.closest('[data-logfood]');if(lf){logFoodModal(lf.dataset.logfood);return;}
   const lm=t.closest('[data-logmeal]');if(lm){logMealModal(lm.dataset.logmeal);return;}
   const dl=t.closest('[data-dellog]');if(dl){await idbDel('log',dl.dataset.dellog);renderToday();return;}
+  const di=t.closest('[data-dismissinsight]');if(di){
+    const rec=(await idbGet('kv','insightDismissals'))||{k:'insightDismissals',v:{}};
+    rec.v[di.dataset.dismissinsight]=todayStr();await idbPut('kv',rec);renderCoach();return;}
   const rp=t.closest('[data-repeatday]');if(rp){const d=parseD(curDate);d.setDate(d.getDate()-1);const prevDay=dstr(d);
     const prev=await idbByDate('log',prevDay);
     if(!prev.length){toast('Nothing logged on '+niceDate(prevDay));return;}
