@@ -79,8 +79,9 @@
       <div id="todayWater"></div>
     </div>
     <div class="tcol-b">
-      <div id="todayCoach"></div>
+      <div id="todayHow"></div>
       <div id="todayPlan"></div>
+      <div id="todayCoach"></div>
       <div id="todaySummary"></div>
       <div id="todayFood"></div>
     </div>
@@ -91,9 +92,9 @@
 <div class="view hidden" id="view-food">
   <h2 class="vt">Food</h2>
   <div class="seg">
-    <button data-fseg="library" class="on">Library</button>
+    <button data-fseg="meals" class="on">Meals</button>
+    <button data-fseg="library">Library</button>
     <button data-fseg="mine">My foods</button>
-    <button data-fseg="meals">Meals</button>
   </div>
   <input class="search" id="foodSearch" placeholder="Search foods…">
   <div class="btnrow" style="margin-bottom:12px">
@@ -105,7 +106,7 @@
 
 <!-- BODY -->
 <div class="view hidden" id="view-body">
-  <h2 class="vt">Measurements</h2>
+  <h2 class="vt">Weight &amp; measurements</h2>
   <div class="card" id="bodyStats"></div>
   <div class="card"><canvas id="weightChart" width="600" height="240" role="img" aria-label="Bodyweight trend line chart with goal line"></canvas><div class="center xs muted" style="margin-top:6px">Bodyweight trend</div></div>
   <button class="btn" id="addMeasureBtn" style="margin-bottom:14px">+ Add measurement</button>
@@ -151,7 +152,7 @@
 <div class="nav" role="navigation" aria-label="Main">
   <button data-nav="today" class="on"><svg><use href="#i-home"/></svg><span class="nl">Today</span></button>
   <button data-nav="food"><svg><use href="#i-food"/></svg><span class="nl">Food</span></button>
-  <button data-nav="body"><svg><use href="#i-ruler"/></svg><span class="nl">Body</span></button>
+  <button data-nav="body"><svg><use href="#i-ruler"/></svg><span class="nl">Weight</span></button>
   <button data-nav="photos"><svg><use href="#i-camera"/></svg><span class="nl">Photos</span></button>
   <button data-nav="train"><svg><use href="#i-dumbbell"/></svg><span class="nl">Train</span></button>
 </div>
@@ -568,6 +569,7 @@ async function loadProgram(){
   EQUIP=(await idbGet('kv','equipment'))?.v||EQUIP;
   // migrate pre-inventory records
   if(!EQUIP.dumbbells)EQUIP.dumbbells=EQUIP.dbMaxKg===10?[2,3,6,10]:[EQUIP.dbMaxKg];
+  if(!EQUIP.bars)EQUIP.bars=[{name:'Olympic barbell',kg:EQUIP.barKg||20}];
   if(!EQUIP.plates)EQUIP.plates=DEFAULT_EQUIPMENT.plates.map(p=>({...p}));
   if(!EQUIP.bands)EQUIP.bands=DEFAULT_EQUIPMENT.bands.slice();
   if(!EQUIP.gear)EQUIP.gear=DEFAULT_EQUIPMENT.gear.slice();
@@ -654,7 +656,7 @@ window.addEventListener('online',()=>syncSoon());
 
 /* ---------- State ---------- */
 let curDate=todayStr();
-let foodSeg='library';
+let foodSeg='meals'; // Meals first — the plan is the primary thing, the library is reference
 let curView='today';
 
 /* ---------- Food maths ---------- */
@@ -667,7 +669,7 @@ async function mealMacros(meal,fmap){fmap=fmap||foodMap(await idbGetAll('foods')
 const DEFAULT_EQUIPMENT={
   dumbbells:[2,3,6,10],dbMaxKg:10,
   kettlebells:[12,16,20,24,32],
-  barKg:20,
+  bars:[{name:'Olympic barbell',kg:20}],barKg:20,
   plates:[{kg:1.25,n:2},{kg:2.5,n:4},{kg:5,n:6},{kg:10,n:4},{kg:20,n:4}],
   plateKg:162.5,microPlateKg:1.25,
   bands:['thin','thin','medium','medium-large','large'],
@@ -771,9 +773,9 @@ const INSIGHT_RULES=[
    {t:'Deload week',b:`This is training week ${s.trainingWeeks} — your plan calls for a deload every 6th week: cut sets ~40% and load ~10%. It should feel too easy; that's the point. Progress resumes next week.`}},
  {id:'missed',sev:'info',cd:2,check:s=>s.hasWorkouts&&s.missed.length>0&&
    {t:'Missed session this week',b:`No workout logged for ${s.missed.join(' or ')}. Slot it in today or tomorrow — consistency beats perfection, just don't let one miss become two.`}},
- {id:'water-low',sev:'info',cd:1,check:s=>new Date().getHours()>=15&&s.hasLogs&&s.waterMl<1000&&
+ {id:'water-low',sev:'info',cd:1,check:s=>new Date().getHours()>=15&&s.days7.length>=1&&s.waterMl<1000&&
    {t:'💧 Water is behind today',b:`Only ${s.waterMl} ml logged and it's already afternoon — the plan targets ~3 L/day. Thirst often masquerades as hunger on a deficit; get a glass in now and use the +250/+500 buttons as you go.`}},
- {id:'weigh-gap',sev:'info',cd:3,check:s=>s.hasLogs&&(s.sinceWeigh==null||s.sinceWeigh>=4)&&
+ {id:'weigh-gap',sev:'info',cd:3,check:s=>s.days7.length>=1&&(s.sinceWeigh==null||s.sinceWeigh>=4)&&
    {t:'Time for a weigh-in',b:s.sinceWeigh==null?'No weigh-ins yet — daily morning weigh-ins (judged only by the weekly average) are how this plan self-corrects.':`Last weigh-in was ${s.sinceWeigh} days ago. Daily morning weigh-ins keep your weekly average honest.`}},
  {id:'photo-gap',sev:'info',cd:7,check:s=>!!s.lastPhoto&&s.sincePhoto>=16&&
    {t:'Progress photo due',b:'It’s been over two weeks — same light, same pose, front/side/back. Photos catch the recomposition the scale hides.'}},
@@ -874,16 +876,32 @@ async function renderToday(){
     const fmap=foodMap(await idbGetAll('foods'));
     const woKey=PROG.days[PROG.schedule[dayAbbr]]?PROG.schedule[dayAbbr]:null;
     let rows='';
+    let nextFound=false;
     for(const m of planMeals){
       const t=await mealMacros(m,fmap);
       const done=!!(grouped[SLOT_KEY[m.slot]]||[]).length;
-      rows+=`<div class="entry planrow${done?' done':''}"><div><div class="n">${done?'✓ ':''}${esc(m.name)}</div><div class="s">${esc(m.slot)} · ${rnd(t.kcal)} kcal · ${rnd(t.protein)}P</div></div>${done?'':`<button class="pillbtn" data-logmeal="${m.id}">Log</button>`}</div>`;
+      const isNext=!done&&!nextFound;if(isNext)nextFound=true; // the one action that matters most gets the primary button
+      rows+=`<div class="entry planrow${done?' done':''}" role="button" tabindex="0" data-logmeal="${m.id}"><div><div class="n">${done?'✓ ':''}${esc(m.name)}</div><div class="s">${esc(m.slot)} · ${rnd(t.kcal)} kcal · ${rnd(t.protein)}P · tap for details</div></div>${done?'':`<button class="${isNext?'btn sm':'pillbtn'}" data-logmeal="${m.id}">${isNext?'Log next':'Log'}</button>`}</div>`;
     }
     if(woKey&&!wos.length)
-      rows+=`<div class="entry planrow"><div><div class="n">🏋️ ${esc(PROG.days[woKey].title.split('—')[1]?.trim()||PROG.days[woKey].title)}</div><div class="s">Training day</div></div><button class="pillbtn" data-startday="${woKey}">Start</button></div>`;
+      rows+=`<div class="entry planrow" role="button" tabindex="0" data-startday="${woKey}"><div><div class="n">🏋️ ${esc(PROG.days[woKey].title.split('—')[1]?.trim()||PROG.days[woKey].title)}</div><div class="s">Training day · tap to start</div></div><button class="pillbtn" data-startday="${woKey}">Start</button></div>`;
     plan=`<div class="card"><div class="meal-h" style="margin-top:0"><span>${DAY_FULL[dayAbbr]}’s plan</span>${woKey?`<span class="badge">🏋️ Day ${woKey}</span>`:`<span class="badge" style="background:var(--soft);color:var(--muted)">Rest day</span>`}</div>${rows}</div>`;
   }
   $('#todayPlan').innerHTML=plan;
+
+  // first-run guide: the app finally explains its own daily loop (dismiss once, gone forever)
+  const howDone=await idbGet('kv','howtoDismissed');
+  $('#todayHow').innerHTML=howDone?'':`<div class="card" style="border-color:color-mix(in srgb,var(--volt) 35%,transparent)">
+    <div class="meal-h" style="margin-top:0"><span>How FitTrack works</span></div>
+    <div class="sm" style="line-height:1.7">
+      <b>1.</b> Eat what's on today's plan below — tap <b>Log next</b> as you go.<br>
+      <b>2.</b> Weigh in each morning (<b>Weigh-in</b> button). One number, done.<br>
+      <b>3.</b> Tap <b>+250</b> when you drink water.<br>
+      <b>4.</b> Mon / Wed / Fri: <b>Start</b> your workout — sets are pre-filled, and it tells you when to add weight.<br>
+      That's the whole job (~60 seconds a day). The 🧠 Coach watches your data and tells you what to change — you never have to analyse anything.
+    </div>
+    <button class="btn sec sm" data-dismisshow style="margin-top:10px">Got it — don't show again</button>
+  </div>`;
 
   // water tracker for the viewed day
   const waterMl=(await idbByDate('water',curDate)).reduce((s,w)=>s+w.ml,0);
@@ -1436,6 +1454,7 @@ document.addEventListener('click',async e=>{
     if(wa.dataset.water==='undo'){const list=(await idbByDate('water',curDate)).sort((a,b)=>b.ts-a.ts);if(list[0])await idbDel('water',list[0].id);}
     else await idbPut('water',{id:uid(),date:curDate,ml:+wa.dataset.water,ts:Date.now()});
     renderToday();return;}
+  if(t.closest('[data-dismisshow]')){await idbPut('kv',{k:'howtoDismissed',v:1});$('#todayHow').innerHTML='';return;}
   const di=t.closest('[data-dismissinsight]');if(di){
     const rec=(await idbGet('kv','insightDismissals'))||{k:'insightDismissals',v:{}};
     rec.v[di.dataset.dismissinsight]=todayStr();await idbPut('kv',rec);renderCoach();return;}
