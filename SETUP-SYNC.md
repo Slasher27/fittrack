@@ -32,15 +32,29 @@ whenever you're online. Photos stay on-device in v1.
      This key is designed to be public; your data is protected by your
      sign-in, not by hiding this key.)
 
-## 5. Configure the app (on every device you use)
+## 5. Configure the app (first device only)
 
 1. FitTrack → ⚙️ **Settings → Cloud sync**.
 2. Fill in: Project URL, your email, your password, the anon key.
 3. Tap **Sync now** — the status line should show "Synced ✓".
 
 That's it. From then on the app syncs automatically a few seconds after any
-change and on every launch. The second device you set up will pull
-everything the first one pushed.
+change, on every launch, when you switch away from the app, and every few
+minutes while it's open.
+
+## 6. Add a phone / tablet / any other device (no typing)
+
+On the device that's already set up: ⚙️ **Settings → 📱 Link another
+device**. Then, on the new device, either:
+
+- **Scan the QR code** with the camera and open the link, or
+- **Copy/Share the link** to yourself (email, WhatsApp…) and open it there.
+
+The new device shows a confirmation ("Set up sync as … your email?") — tap
+**Set up & sync** and it signs in and pulls everything. Nothing to type.
+
+> ⚠️ The QR/link contains your sync password. Only share it with yourself,
+> and delete the message after the new device is linked.
 
 ## Notes
 

@@ -158,7 +158,9 @@ right trade. Sync triggers: launch, 2 s after a local write (`syncSoon`),
 suspends us), on tab re-focus, every 5 min while visible, on `online`, and the
 Settings "Sync now" button.
 Photos and `kv` are device-local. Sync credentials live in `SET.sync` and are
-stripped from backups. The service worker must never intercept cross-origin
+stripped from backups; new devices onboard via Settings → "📱 Link another
+device" (QR/link with a `#sync=` payload; hand-written QR encoder in
+`index.html` — verify changes to it against a real decoder, see link-test). The service worker must never intercept cross-origin
 requests (see the origin check in `service-worker.js`).
 
 **Macro model:** each food stores macros **per one serving**. `serving` is a
