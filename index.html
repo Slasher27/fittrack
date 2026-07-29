@@ -6,6 +6,7 @@
 <meta name="theme-color" content="#0B0D0C">
 <link rel="preload" href="fonts/BarlowCondensed-700.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="fonts/BarlowCondensed-600.woff2" as="font" type="font/woff2" crossorigin>
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="FitTrack">
@@ -67,7 +68,7 @@
         </div>
         <div class="row between sm muted" style="margin-top:12px">
           <span>Eaten: <b id="calEaten" style="color:var(--ink)">0</b> kcal</span>
-          <span>Target: <b id="calTarget" style="color:var(--ink)">2150</b> kcal</span>
+          <span>Target: <b id="calTarget" style="color:var(--ink)">2150</b> kcal <span class="xs muted" id="tgtMode"></span></span>
         </div>
       </div>
       <div class="btnrow q" style="margin-bottom:14px">
@@ -84,6 +85,7 @@
       <div id="todayCoach"></div>
       <div id="todaySummary"></div>
       <div id="todayFood"></div>
+      <div id="todayWeek"></div>
     </div>
   </div>
 </div>
@@ -108,7 +110,18 @@
 <div class="view hidden" id="view-body">
   <h2 class="vt">Weight &amp; measurements</h2>
   <div class="card" id="bodyStats"></div>
-  <div class="card"><canvas id="weightChart" width="600" height="240" role="img" aria-label="Bodyweight trend line chart with goal line"></canvas><div class="center xs muted" style="margin-top:6px">Bodyweight trend</div></div>
+  <div class="card">
+    <div class="seg" style="max-width:240px;margin-bottom:10px">
+      <button data-crange="30">30d</button>
+      <button data-crange="90" class="on">90d</button>
+      <button data-crange="0">All</button>
+    </div>
+    <div style="position:relative">
+      <canvas id="weightChart" width="600" height="240" role="img" aria-label="Bodyweight trend line chart with 7-day average and goal line"></canvas>
+      <div id="chartTip" class="charttip hidden"></div>
+    </div>
+    <div class="center xs muted" style="margin-top:6px">dots = weigh-ins · bright line = 7-day average · tap a point for details</div>
+  </div>
   <button class="btn" id="addMeasureBtn" style="margin-bottom:14px">+ Add measurement</button>
   <div id="measureList"></div>
 </div>
@@ -130,6 +143,15 @@
   </div>
   <h3 style="font-size:15px;margin:22px 0 8px">History</h3>
   <div id="workoutHistory"></div>
+</div>
+
+<!-- GYM (equipment inventory — a page, not a modal) -->
+<div class="view hidden" id="view-gym">
+  <div class="row" style="gap:10px;margin-bottom:4px">
+    <button class="pillbtn" id="gymBack" aria-label="Back to Train">‹ Train</button>
+  </div>
+  <h2 class="vt">My Gym</h2>
+  <div id="gymBody"></div>
 </div>
 
 <!-- PLAN / HELP -->
@@ -630,24 +652,33 @@ async function syncNow(){
       if(SYNCED_KV.has(r.k)&&(r.up||0)>lastPush){payload.push({store:'kv',id:r.k,data:r,up:r.up,deleted:false});maxUp=Math.max(maxUp,r.up);}
     const tomb=(await idbGet('kv','tombstones'))?.v||[];
     for(const t of tomb){payload.push({store:t.store,id:t.id,data:null,up:t.up,deleted:true});maxUp=Math.max(maxUp,t.up);}
-    if(payload.length){
-      const res=await sb('/rest/v1/records?on_conflict=store,id',{method:'POST',headers:{Prefer:'resolution=merge-duplicates'},body:JSON.stringify(payload)});
+    // dedupe by (store,id), newest wins — a delete-then-recreate (e.g. meal reseed) must
+    // push the recreation, not the stale tombstone, and Postgres rejects duplicate keys in one upsert
+    const newest=new Map();
+    for(const r of payload){const k=r.store+'|'+r.id;const ex=newest.get(k);if(!ex||r.up>ex.up)newest.set(k,r);}
+    const rows=[...newest.values()];
+    if(rows.length){
+      const res=await sb('/rest/v1/records?on_conflict=store,id',{method:'POST',headers:{Prefer:'resolution=merge-duplicates'},body:JSON.stringify(rows)});
       if(!res.ok)throw new Error('push failed ('+res.status+')');
       s.lastPush=maxUp;await idbPut('kv',{k:'tombstones',v:[]});
     }
     // PULL: rows newer than our last pull; apply if newer than local (last write wins)
     const res2=await sb('/rest/v1/records?select=*&up=gt.'+(s.lastPull||0)+'&order=up.asc',{});
     if(!res2.ok)throw new Error('pull failed ('+res2.status+')');
-    const rows=await res2.json();let applied=0,kvApplied=false;
-    for(const row of rows){
+    const pulled=await res2.json();let applied=0,kvApplied=false;
+    for(const row of pulled){
       const isKv=row.store==='kv'&&SYNCED_KV.has(row.id);
       if(!SYNC_STORES.has(row.store)&&!isKv)continue;
-      if(row.deleted){if(!isKv){await idbDel(row.store,row.id,true);applied++;}continue;}
-      const local=await idbGet(row.store,isKv?row.id:row.id);
+      const local=await idbGet(row.store,row.id);
+      if(row.deleted){
+        // deletes obey last-write-wins too: a locally newer record (edit or reseed) beats an old tombstone
+        if(!isKv&&local&&(local.up||0)<row.up){await idbDel(row.store,row.id,true);applied++;}
+        continue;
+      }
       if(!local||(local.up||0)<row.up){await idbPut(row.store,row.data,true);applied++;if(isKv)kvApplied=true;}
     }
     if(kvApplied)await loadProgram();
-    if(rows.length)s.lastPull=Math.max(s.lastPull||0,...rows.map(r=>r.up));
+    if(pulled.length)s.lastPull=Math.max(s.lastPull||0,...pulled.map(r=>r.up));
     s.lastSync=Date.now();await saveSettings();
     return applied;
   }finally{syncBusy=false;}
@@ -658,11 +689,12 @@ window.addEventListener('online',()=>syncSoon());
 let curDate=todayStr();
 let foodSeg='meals'; // Meals first — the plan is the primary thing, the library is reference
 let curView='today';
+let chartRange=90; // weight chart window in days; 0 = all
 
 /* ---------- Food maths ---------- */
 function foodMap(list){const m={};for(const f of list)m[f.id]=f;return m;}
 function scale(food,servings){return{kcal:food.kcal*servings,protein:food.protein*servings,carbs:food.carbs*servings,fat:food.fat*servings};}
-async function mealMacros(meal,fmap){fmap=fmap||foodMap(await idbGetAll('foods'));let t={kcal:0,protein:0,carbs:0,fat:0};for(const it of meal.items){const f=fmap[it.foodId];if(!f)continue;const s=scale(f,it.servings);for(const k in t)t[k]+=s[k];}return t;}
+async function mealMacros(meal,fmap){fmap=fmap||foodMap(await idbGetAll('foods'));let t={kcal:0,protein:0,carbs:0,fat:0};if(!meal||!meal.items)return t;for(const it of meal.items){const f=fmap[it.foodId];if(!f)continue;const s=scale(f,it.servings);for(const k in t)t[k]+=s[k];}return t;}
 
 /* ============================ COACH (insights engine) ============================ */
 /* Deterministic personal-trainer rules over local data. Offline, private, free. */
@@ -834,7 +866,13 @@ async function renderToday(){
   const entries=(await idbByDate('log',curDate)).sort((a,b)=>a.ts-b.ts);
   let tot={kcal:0,protein:0,carbs:0,fat:0};
   entries.forEach(e=>{tot.kcal+=e.kcal;tot.protein+=e.protein;tot.carbs+=e.carbs;tot.fat+=e.fat;});
-  const T=SET.targets;
+  // training days can carry their own calorie target (Settings → "Training-day kcal")
+  const dayAbbrT=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][parseD(curDate).getDay()];
+  const wos=await idbByDate('workouts',curDate);
+  const isTrainDay=!!PROG.days[PROG.schedule[dayAbbrT]]||wos.length>0;
+  const T={...SET.targets};
+  if(isTrainDay&&SET.targets.kcalTrain)T.kcal=SET.targets.kcalTrain;
+  $('#tgtMode').textContent=(isTrainDay&&SET.targets.kcalTrain)?'(training day)':'';
   const remain=Math.round(T.kcal-tot.kcal);
   countUp($('#calRemain'),remain);
   $('#calRemain').style.color=remain<0?'var(--danger)':'var(--ink)';
@@ -848,7 +886,6 @@ async function renderToday(){
 
   // summary: measurement + workout for the day
   const meas=(await idbByDate('measurements',curDate))[0];
-  const wos=await idbByDate('workouts',curDate);
   let sum='';
   if(meas){sum+=`<div class="card"><div class="row between"><div><span class="badge">⚖️ Weigh-in</span> <b style="margin-left:6px">${meas.weight??'–'} kg</b>${meas.waist?` · waist ${meas.waist} cm`:''}</div></div></div>`;}
   if(wos.length){wos.forEach(w=>{const done=w.exercises.reduce((n,e)=>n+e.sets.filter(s=>s.reps).length,0);sum+=`<div class="card sessioncard"><div class="row between"><div><span class="badge">🏋️ ${esc(w.title.split('—')[0].trim())}</span> <span class="sm muted">${done} sets logged</span></div><button class="pillbtn" data-openwo="${w.id}">View</button></div></div>`;});}
@@ -863,7 +900,7 @@ async function renderToday(){
   let any=false;
   for(const slot of order){const es=grouped[slot];if(!es||!es.length)continue;any=true;let sk=es.reduce((n,e)=>n+e.kcal,0);
     html+=`<div class="meal-h"><span>${labels[slot]}</span><span>${rnd(sk)} kcal</span></div>`;
-    es.forEach(e=>{html+=`<div class="entry"><div><div class="n">${esc(e.name)}</div><div class="s">${(+e.servings).toString().replace(/\.0$/,'')} × ${esc(e.serving||'')} · ${rnd(e.protein)}P ${rnd(e.carbs)}C ${rnd(e.fat)}F</div></div><div class="row" style="gap:8px"><div class="k">${rnd(e.kcal)}</div><button class="pillbtn" data-dellog="${e.id}" aria-label="Remove logged item">✕</button></div></div>`;});
+    es.forEach(e=>{html+=`<div class="entry planrow" role="button" tabindex="0" data-editlog="${e.id}"><div><div class="n">${esc(e.name)}</div><div class="s">${(+e.servings).toString().replace(/\.0$/,'')} × ${esc(e.serving||'')} · ${rnd(e.protein)}P ${rnd(e.carbs)}C ${rnd(e.fat)}F · tap to edit</div></div><div class="row" style="gap:8px"><div class="k">${rnd(e.kcal)}</div><button class="pillbtn" data-dellog="${e.id}" aria-label="Remove logged item">✕</button></div></div>`;});
   }
   $('#todayFood').innerHTML=any?`<div class="card">${html}</div>`:`<div class="empty"><span class="ic">🍽️</span>No food logged yet.<br>Tap “Log food” or “Log meal” above.<br><button class="btn sec sm" data-repeatday style="margin-top:12px">↻ Repeat yesterday’s log</button></div>`;
 
@@ -888,6 +925,36 @@ async function renderToday(){
     plan=`<div class="card"><div class="meal-h" style="margin-top:0"><span>${DAY_FULL[dayAbbr]}’s plan</span>${woKey?`<span class="badge">🏋️ Day ${woKey}</span>`:`<span class="badge" style="background:var(--soft);color:var(--muted)">Rest day</span>`}</div>${rows}</div>`;
   }
   $('#todayPlan').innerHTML=plan;
+
+  // this week at a glance (Mon-based): intake vs target, sessions, weight trend
+  {
+    const [allLogs,allMeas,allWos]=await Promise.all([idbGetAll('log'),idbGetAll('measurements'),idbGetAll('workouts')]);
+    const now=parseD(todayStr());const monOff=(now.getDay()+6)%7;
+    const dOff=n=>{const d=new Date(now);d.setDate(d.getDate()-n);return dstr(d);};
+    const weekDates=[];for(let i=monOff;i>=0;i--)weekDates.push(dOff(i));
+    const byDay={};allLogs.forEach(e=>{if(weekDates.includes(e.date)){const d=byDay[e.date]=byDay[e.date]||{kcal:0,protein:0};d.kcal+=e.kcal;d.protein+=e.protein;}});
+    const anyData=Object.keys(byDay).length>0;
+    const loggedDays=Object.keys(byDay).filter(d=>d!==todayStr()||byDay[d].kcal>800); // averages skip a barely-started today
+    const avgK=loggedDays.length?loggedDays.reduce((s,d)=>s+byDay[d].kcal,0)/loggedDays.length:null;
+    const avgP=loggedDays.length?loggedDays.reduce((s,d)=>s+byDay[d].protein,0)/loggedDays.length:null;
+    const sessions=allWos.filter(w=>weekDates.includes(w.date)).length;
+    const scheduled=Object.keys(PROG.schedule||{}).length;
+    const wWeek=allMeas.filter(m=>m.weight!=null&&weekDates.includes(m.date));
+    const prevDates=[];for(let i=monOff+7;i>monOff;i--)prevDates.push(dOff(i));
+    const wPrev=allMeas.filter(m=>m.weight!=null&&prevDates.includes(m.date));
+    const mean=a=>a.length?a.reduce((s,m)=>s+m.weight,0)/a.length:null;
+    const delta=(mean(wWeek)!=null&&mean(wPrev)!=null)?mean(wWeek)-mean(wPrev):null;
+    const stat=(v,lab)=>`<div style="flex:1;text-align:center"><div style="font-family:var(--font-display);font-size:24px;font-weight:700">${v}</div><div class="xs muted" style="text-transform:uppercase;letter-spacing:.08em">${lab}</div></div>`;
+    $('#todayWeek').innerHTML=(anyData||sessions)?`<div class="card">
+      <div class="meal-h" style="margin-top:0"><span>This week</span><span class="badge">${weekDates.length} day${weekDates.length>1?'s':''} in</span></div>
+      <div class="row" style="gap:6px">
+        ${stat(avgK!=null?rnd(avgK):'–','avg kcal / '+SET.targets.kcal)}
+        ${stat(avgP!=null?rnd(avgP)+'g':'–','avg protein / '+SET.targets.protein+'g')}
+        ${stat(sessions+'/'+scheduled,'sessions')}
+        ${stat(delta!=null?(delta>0?'+':'')+delta.toFixed(1)+'kg':'–','vs last week')}
+      </div>
+    </div>`:'';
+  }
 
   // first-run guide: the app finally explains its own daily loop (dismiss once, gone forever)
   const howDone=await idbGet('kv','howtoDismissed');
@@ -963,8 +1030,16 @@ function openModal(html){const r=$('#modalRoot');
   document.body.style.overflow='hidden'; // lock background scroll while the sheet is open
   const m=r.querySelector('.modal');
   setTimeout(()=>{if(m&&!m.contains(document.activeElement))m.focus();},60); // don't steal focus if the user is already typing
+  m.addEventListener('keydown',e=>{ // keep Tab inside the dialog
+    if(e.key!=='Tab')return;
+    const f=[...m.querySelectorAll('button,input,select,textarea,[tabindex="0"]')].filter(x=>x.offsetParent!==null);
+    if(!f.length)return;
+    const first=f[0],last=f[f.length-1];
+    if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}
+    else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}
+  });
 }
-function closeModal(){$('#modalRoot').innerHTML='';document.body.style.overflow='';}
+function closeModal(){clearInterval(restInt);$('#modalRoot').innerHTML='';document.body.style.overflow='';}
 
 async function logFoodModal(foodId){
   const f=await idbGet('foods',foodId);if(!f)return;
@@ -994,7 +1069,9 @@ async function logFoodModal(foodId){
 }
 
 async function logMealModal(mealId){
-  const meal=await idbGet('meals',mealId);const fmap=foodMap(await idbGetAll('foods'));const t=await mealMacros(meal,fmap);
+  const meal=await idbGet('meals',mealId);
+  if(!meal){toast('That meal no longer exists');renderToday();if(curView==='food')renderFood();return;}
+  const fmap=foodMap(await idbGetAll('foods'));const t=await mealMacros(meal,fmap);
   const rows=meal.items.map(it=>{const f=fmap[it.foodId];if(!f)return '';const m=scale(f,it.servings);
     const wt=f.serving.match(/^(\d+(?:\.\d+)?)\s*(g|ml)\b/i);
     const grams=wt?` · ${rnd(it.servings*parseFloat(wt[1]))} ${wt[2]}`:'';
@@ -1018,6 +1095,32 @@ async function logMealModal(mealId){
     closeModal();buzz();toast('Logged '+meal.name);curDate=date;go('today');};
 }
 
+async function editLogModal(id){
+  const e=await idbGet('log',id);
+  if(!e){toast('Entry no longer exists');renderToday();return;}
+  const unit=+e.servings>0?{kcal:e.kcal/e.servings,protein:e.protein/e.servings,carbs:e.carbs/e.servings,fat:e.fat/e.servings}
+    :{kcal:e.kcal,protein:e.protein,carbs:e.carbs,fat:e.fat};
+  openModal(`<div class="mh"><h3>Edit entry</h3><button class="x" onclick="closeModal()">✕</button></div>
+    <p class="sm muted" style="margin:0 0 4px">${esc(e.name)} — per ${esc(e.serving||'serving')}: ${rnd(unit.kcal)} kcal · ${rnd(unit.protein)}P</p>
+    <label class="fl" for="elServ">Servings (${esc(e.serving||'serving')})</label>
+    <input id="elServ" type="number" inputmode="decimal" step="0.1" min="0.1" value="${e.servings}">
+    <div class="sm muted" id="elCalc" style="margin-top:8px"></div>
+    <label class="fl" for="elSlot">Meal</label>
+    <select id="elSlot">${['breakfast','lunch','snack','dinner'].map(s=>`<option value="${s}"${s===e.meal?' selected':''}>${s[0].toUpperCase()+s.slice(1)}</option>`).join('')}</select>
+    <label class="fl" for="elDate">Date</label><input id="elDate" type="date" value="${e.date}">
+    <button class="btn" style="margin-top:16px" id="elSave">Save changes</button>
+    <button class="btn danger sm" style="margin-top:8px;width:100%" id="elDel">Delete entry</button>`);
+  const upd=()=>{const s=parseFloat($('#elServ').value)||0;
+    $('#elCalc').innerHTML=`= <b style="color:var(--ink)">${rnd(unit.kcal*s)} kcal</b> · ${rnd(unit.protein*s)}P ${rnd(unit.carbs*s)}C ${rnd(unit.fat*s)}F`;};
+  $('#elServ').addEventListener('input',upd);upd();
+  $('#elSave').onclick=async()=>{
+    const s=parseFloat($('#elServ').value)||0;if(s<=0)return toast('Servings must be above 0');
+    const date=$('#elDate').value,slot=$('#elSlot').value;
+    await idbPut('log',{...e,servings:s,meal:slot,date,kcal:unit.kcal*s,protein:unit.protein*s,carbs:unit.carbs*s,fat:unit.fat*s});
+    closeModal();buzz();toast('Entry updated');curDate=date;renderToday();};
+  $('#elDel').onclick=async()=>{await idbDel('log',e.id);closeModal();toast('Entry removed');renderToday();};
+}
+
 function addFoodModal(){
   openModal(`<div class="mh"><h3>New custom food</h3><button class="x" onclick="closeModal()">✕</button></div>
    <label class="fl">Name</label><input id="cfName" placeholder="e.g. Protein bar">
@@ -1036,6 +1139,7 @@ function addFoodModal(){
 async function buildMealModal(editId){
   const foods=await idbGetAll('foods');
   const meal=editId?await idbGet('meals',editId):null;
+  if(editId&&!meal){toast('That meal no longer exists');renderFood();return;}
   openModal(`<div class="mh"><h3>${meal?'Edit meal':'Build a meal'}</h3><button class="x" onclick="closeModal()">✕</button></div>
    ${meal&&meal.day?`<div class="sm muted" style="margin:-2px 0 6px">${DAY_FULL[meal.day]} · ${esc(meal.slot)} — from your plan; your edited version replaces it and survives plan updates.</div>`:''}
    <label class="fl">Meal name</label><input id="bmName" placeholder="e.g. My Monday lunch" value="${meal?esc(meal.name):''}">
@@ -1087,13 +1191,19 @@ async function renderBody(){
   // list
   $('#measureList').innerHTML=list.length?list.map(m=>`<div class="card" style="padding:12px 14px"><div class="row between"><div><b>${niceDate(m.date)}</b> <span class="sm muted">${parseD(m.date).toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'})}</span></div><div class="row" style="gap:7px"><button class="pillbtn" data-editmeas="${m.id}" aria-label="Edit measurement">✎</button><button class="pillbtn" data-delmeas="${m.id}" aria-label="Delete measurement">✕</button></div></div><div class="sm" style="margin-top:4px">${[m.weight!=null?`⚖️ ${m.weight} kg`:'',m.waist?`📏 waist ${m.waist} cm`:'',m.chest?`chest ${m.chest}`:'',m.arm?`arm ${m.arm}`:'',m.thigh?`thigh ${m.thigh}`:''].filter(Boolean).join(' · ')}</div>${m.notes?`<div class="sm muted" style="margin-top:3px">“${esc(m.notes)}”</div>`:''}</div>`).join(''):'';
 }
+let chartPts=[]; // css-pixel positions of drawn weigh-ins, for the tap tooltip
 function drawWeightChart(data){
-  const cv=$('#weightChart'),ctx=cv.getContext('2d');const W=cv.width=cv.clientWidth*2,H=cv.height=480;ctx.scale(1,1);
-  ctx.clearRect(0,0,W,H);
-  const pts=data.filter(d=>d.weight!=null);
+  const cv=$('#weightChart'),ctx=cv.getContext('2d');const W=cv.width=cv.clientWidth*2,H=cv.height=480;
+  ctx.clearRect(0,0,W,H);chartPts=[];
+  let pts=data.filter(d=>d.weight!=null);
+  if(chartRange>0){const cut=new Date();cut.setDate(cut.getDate()-chartRange);const cs=dstr(cut);pts=pts.filter(p=>p.date>=cs);}
   if(pts.length<1){ctx.fillStyle=cssVar('--muted');ctx.font='24px sans-serif';ctx.textAlign='center';ctx.fillText('Log weigh-ins to see your trend',W/2,H/2);return;}
+  // rolling 7-day average — the signal that matters for recomp
+  const avg=pts.map(p=>{const t=parseD(p.date).getTime();
+    const win=pts.filter(q=>{const qt=parseD(q.date).getTime();return qt<=t&&qt>t-7*864e5;});
+    return{date:p.date,weight:win.reduce((s,q)=>s+q.weight,0)/win.length};});
   const pad=60;const xs=pts.map(p=>parseD(p.date).getTime());
-  const ws=pts.map(p=>p.weight).concat([SET.goalWeight]);
+  const ws=pts.map(p=>p.weight).concat(avg.map(a=>a.weight)).concat([SET.goalWeight]);
   let minW=Math.min(...ws)-0.5,maxW=Math.max(...ws)+0.5;if(maxW-minW<2){maxW+=1;minW-=1;}
   const minX=Math.min(...xs),maxX=Math.max(...xs)||minX+1;
   const X=t=>pad+(maxX===minX?0.5:(t-minX)/(maxX-minX))*(W-pad*1.4);
@@ -1104,10 +1214,17 @@ function drawWeightChart(data){
   // axis labels
   ctx.fillStyle=cssVar('--muted');ctx.font='20px sans-serif';ctx.textAlign='right';
   ctx.fillText(maxW.toFixed(1),pad-8,Y(maxW)+6);ctx.fillText(minW.toFixed(1),pad-8,Y(minW)+6);
-  // line
-  ctx.strokeStyle=cssVar('--brand');ctx.lineWidth=3;ctx.beginPath();
+  // raw weigh-ins: quiet line + dots
+  ctx.strokeStyle=cssVar('--line2');ctx.lineWidth=2;ctx.beginPath();
   pts.forEach((p,i)=>{const x=X(parseD(p.date).getTime()),y=Y(p.weight);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();
-  ctx.fillStyle=cssVar('--brand');pts.forEach(p=>{ctx.beginPath();ctx.arc(X(parseD(p.date).getTime()),Y(p.weight),5,0,7);ctx.fill();});
+  ctx.fillStyle=cssVar('--muted');
+  pts.forEach(p=>{const x=X(parseD(p.date).getTime()),y=Y(p.weight);
+    ctx.beginPath();ctx.arc(x,y,4.5,0,7);ctx.fill();
+    chartPts.push({cssX:x/2,cssY:y/2,date:p.date,weight:p.weight});});
+  // 7-day average: the bright volt line
+  ctx.strokeStyle=cssVar('--brand');ctx.lineWidth=4;ctx.shadowColor=cssVar('--brand');ctx.shadowBlur=10;ctx.beginPath();
+  avg.forEach((p,i)=>{const x=X(parseD(p.date).getTime()),y=Y(p.weight);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();
+  ctx.shadowBlur=0;
 }
 async function addMeasureModal(editId){
   const m=editId?await idbGet('measurements',editId):null;
@@ -1149,10 +1266,22 @@ function addPhotoModal(){
 }
 function compressImage(file){return new Promise(res=>{const img=new Image();img.onload=()=>{const max=1280;let{width:w,height:h}=img;if(w>h&&w>max){h=h*max/w;w=max;}else if(h>max){w=w*max/h;h=max;}
   const cv=document.createElement('canvas');cv.width=w;cv.height=h;cv.getContext('2d').drawImage(img,0,0,w,h);cv.toBlob(b=>res(b||file),'image/jpeg',0.82);};img.src=URL.createObjectURL(file);});}
-function viewPhotoModal(id){idbGet('photos',id).then(p=>{const url=URL.createObjectURL(p.blob);
+function viewPhotoModal(id){idbGet('photos',id).then(p=>{
+  if(!p){toast('Photo no longer exists');renderPhotos();return;}
+  const url=URL.createObjectURL(p.blob);
   openModal(`<div class="mh"><h3>${esc(p.category)} · ${niceDate(p.date)}</h3><button class="x" onclick="closeModal()">✕</button></div>
-   <img src="${url}" alt="${esc(p.category||'Progress')} photo, ${niceDate(p.date)}" style="width:100%;border-radius:14px">${p.note?`<p class="sm muted" style="margin-top:8px">“${esc(p.note)}”</p>`:''}
-   <button class="btn danger" style="margin-top:12px" data-delphoto="${p.id}">Delete photo</button>`);});}
+   <img src="${url}" alt="${esc(p.category||'Progress')} photo, ${niceDate(p.date)}" style="width:100%;border-radius:14px">
+   <div class="in2" style="margin-top:12px">
+     <div><label class="fl" for="phEcat" style="margin-top:0">Angle</label><select id="phEcat">${['Front','Side','Back'].map(c=>`<option${c===p.category?' selected':''}>${c}</option>`).join('')}</select></div>
+     <div><label class="fl" for="phEdate" style="margin-top:0">Date</label><input id="phEdate" type="date" value="${p.date}"></div>
+   </div>
+   <label class="fl" for="phEnote">Note</label><input id="phEnote" value="${esc(p.note||'')}" placeholder="e.g. morning, fasted">
+   <button class="btn" style="margin-top:12px" id="phEsave">Save changes</button>
+   <button class="btn danger sm" style="margin-top:8px;width:100%" data-delphoto="${p.id}">Delete photo</button>`);
+  $('#phEsave').onclick=async()=>{
+    await idbPut('photos',{...p,category:$('#phEcat').value,date:$('#phEdate').value,note:$('#phEnote').value.trim()});
+    closeModal();toast('Photo updated');renderPhotos();};
+});}
 
 /* ============================ TRAIN ============================ */
 function renderTrainStart(){
@@ -1208,76 +1337,41 @@ function editDayModal(key){
     await saveProgram();closeModal();renderTrainStart();renderToday();toast('Program saved');};
 }
 
-function gymModal(){
-  const inv={
-    dumbbells:(EQUIP.dumbbells||[]).slice().sort((a,b)=>a-b),
-    kettlebells:EQUIP.kettlebells.slice().sort((a,b)=>a-b),
-    plates:(EQUIP.plates||[]).map(p=>({...p})).sort((a,b)=>a.kg-b.kg),
-    bands:(EQUIP.bands||[]).slice(),
-    gear:(EQUIP.gear||[]).slice(),
-  };
-  openModal(`<div class="mh"><h3>My gym</h3><button class="x" onclick="closeModal()">✕</button></div>
-   <p class="sm muted" style="margin:0 0 4px">Your full inventory. The Coach uses it to know what's maxed and what to move to next — anything you buy, add here.</p>
-   <label class="fl">Barbell (kg)</label><input id="gyBar" type="number" step="0.5" inputmode="decimal" value="${EQUIP.barKg}">
-   <label class="fl">Plates</label>
-   <div class="chips" id="gyPlChips"></div>
-   <div class="chipadd"><input id="gyPlKg" type="number" step="0.25" min="0.25" inputmode="decimal" placeholder="kg (e.g. 15)" aria-label="Plate weight in kg" style="flex:1"><input id="gyPlN" type="number" step="1" min="1" inputmode="numeric" placeholder="how many" aria-label="Number of plates" style="flex:1"><button class="btn sm sec" id="gyPlAdd">+ Add</button></div>
-   <label class="fl">Dumbbells (kg pairs)</label>
-   <div class="chips" id="gyDbChips"></div>
-   <div class="chipadd"><input id="gyDbNew" type="number" step="0.5" min="0.5" inputmode="decimal" placeholder="e.g. 12.5" aria-label="New dumbbell weight in kg"><button class="btn sm sec" id="gyDbAdd">+ Add</button></div>
-   <label class="fl">Kettlebells (kg)</label>
-   <div class="chips" id="gyKbChips"></div>
-   <div class="chipadd"><input id="gyKbNew" type="number" step="1" min="1" inputmode="decimal" placeholder="e.g. 28" aria-label="New kettlebell weight in kg"><button class="btn sm sec" id="gyKbAdd">+ Add</button></div>
-   <label class="fl">Resistance bands</label>
-   <div class="chips" id="gyBdChips"></div>
-   <div class="chipadd"><input id="gyBdNew" placeholder="e.g. extra-heavy" aria-label="New band"><button class="btn sm sec" id="gyBdAdd">+ Add</button></div>
-   <label class="fl">Stations &amp; gear</label>
-   <div class="chips" id="gyGrChips"></div>
-   <div class="chipadd"><input id="gyGrNew" placeholder="e.g. rowing machine" aria-label="New gear"><button class="btn sm sec" id="gyGrAdd">+ Add</button></div>
-   <p class="xs muted" id="gyTotals" style="margin:10px 0 0"></p>
-   <button class="btn" style="margin-top:14px" id="gySave">Save</button>`);
-  const chip=(label,listId,i)=>`<span class="chip">${esc(String(label))}<button data-rm="${listId}:${i}" aria-label="Remove ${esc(String(label))}">✕</button></span>`;
-  const draw=()=>{
-    const none='<span class="sm muted">None yet</span>';
-    $('#gyPlChips').innerHTML=inv.plates.length?inv.plates.map((p,i)=>chip(`${p.kg} kg × ${p.n}`,'plates',i)).join(''):none;
-    $('#gyDbChips').innerHTML=inv.dumbbells.length?inv.dumbbells.map((v,i)=>chip(v+' kg','dumbbells',i)).join(''):none;
-    $('#gyKbChips').innerHTML=inv.kettlebells.length?inv.kettlebells.map((v,i)=>chip(v+' kg','kettlebells',i)).join(''):none;
-    $('#gyBdChips').innerHTML=inv.bands.length?inv.bands.map((v,i)=>chip(v,'bands',i)).join(''):none;
-    $('#gyGrChips').innerHTML=inv.gear.length?inv.gear.map((v,i)=>chip(v,'gear',i)).join(''):none;
-    const tot=inv.plates.reduce((s,p)=>s+p.kg*p.n,0);
-    $('#gyTotals').textContent=`Plate total ${tot} kg → max bar load ≈ ${tot+(+$('#gyBar').value||0)} kg. Smallest plate ${inv.plates.length?Math.min(...inv.plates.map(p=>p.kg)):'—'} kg (used for micro-loading advice).`;
-  };
-  draw();
-  $('#modalRoot').querySelectorAll('.chips').forEach(c=>c.addEventListener('click',e=>{
-    const b=e.target.closest('[data-rm]');if(!b)return;
-    const[list,i]=b.dataset.rm.split(':');inv[list].splice(+i,1);draw();
-  }));
-  const addNum=(inputId,list)=>{const v=+$(inputId).value;if(!(v>0))return toast('Enter a weight');
-    if(list.includes(v))return toast('Already in your gym');
-    list.push(v);list.sort((a,b)=>a-b);$(inputId).value='';draw();};
-  $('#gyDbAdd').onclick=()=>addNum('#gyDbNew',inv.dumbbells);
-  $('#gyKbAdd').onclick=()=>addNum('#gyKbNew',inv.kettlebells);
-  $('#gyPlAdd').onclick=()=>{const kg=+$('#gyPlKg').value,n=+$('#gyPlN').value||2;
-    if(!(kg>0))return toast('Enter the plate weight');
-    const ex=inv.plates.find(p=>p.kg===kg);
-    if(ex)ex.n+=n;else inv.plates.push({kg,n});
-    inv.plates.sort((a,b)=>a.kg-b.kg);$('#gyPlKg').value='';$('#gyPlN').value='';draw();};
-  const addTxt=(inputId,list)=>{const v=$(inputId).value.trim();if(!v)return toast('Type a name');
-    list.push(v);$(inputId).value='';draw();};
-  $('#gyBdAdd').onclick=()=>addTxt('#gyBdNew',inv.bands);
-  $('#gyGrAdd').onclick=()=>addTxt('#gyGrNew',inv.gear);
-  $('#gyBar').addEventListener('input',draw);
-  $('#gySave').onclick=async()=>{
-    if(!inv.kettlebells.length&&!inv.dumbbells.length&&!inv.plates.length)return toast('Keep at least one weight in the gym');
-    EQUIP.barKg=+$('#gyBar').value||EQUIP.barKg;
-    EQUIP.plates=inv.plates;
-    EQUIP.plateKg=inv.plates.reduce((s,p)=>s+p.kg*p.n,0);
-    EQUIP.microPlateKg=inv.plates.length?Math.min(...inv.plates.map(p=>p.kg)):EQUIP.microPlateKg;
-    EQUIP.dumbbells=inv.dumbbells;EQUIP.dbMaxKg=inv.dumbbells.length?Math.max(...inv.dumbbells):EQUIP.dbMaxKg;
-    EQUIP.kettlebells=inv.kettlebells;
-    EQUIP.bands=inv.bands;EQUIP.gear=inv.gear;
-    await idbPut('kv',{k:'equipment',v:EQUIP});
-    closeModal();toast('Gym updated');renderCoach();};
+/* My Gym is a page (not a modal): browse + manage the full inventory, auto-saved & synced. */
+function renderGym(){
+  const eq=EQUIP;
+  const chip=(label,cat,i)=>`<span class="chip">${esc(String(label))}<button data-gyrm="${cat}:${i}" aria-label="Remove ${esc(String(label))}">✕</button></span>`;
+  const none='<span class="sm muted">None yet</span>';
+  const sec=(title,chipsHtml,addHtml)=>`<div class="card"><div class="meal-h" style="margin-top:0"><span>${title}</span></div><div class="chips">${chipsHtml}</div>${addHtml}</div>`;
+  const plateTot=(eq.plates||[]).reduce((s,p)=>s+p.kg*p.n,0);
+  const mainBar=(eq.bars||[]).length?Math.max(...eq.bars.map(b=>b.kg)):0;
+  const micro=(eq.plates||[]).length?Math.min(...eq.plates.map(p=>p.kg)):0;
+  const kpi=(v,lab)=>`<div style="flex:1;text-align:center"><div style="font-family:var(--font-display);font-size:24px;font-weight:700">${v}</div><div class="xs muted" style="text-transform:uppercase;letter-spacing:.08em">${lab}</div></div>`;
+  $('#gymBody').innerHTML=`
+   <div class="card">
+     <div class="row" style="gap:6px">${kpi((plateTot+mainBar)+' kg','max bar load')}${kpi(plateTot+' kg','plate total')}${kpi(micro+' kg','micro plate')}</div>
+     <p class="xs muted center" style="margin:10px 0 0">Changes save instantly and sync to your devices. The Coach reads this to know what's maxed and what to suggest next.</p>
+   </div>
+   ${sec('Bars',(eq.bars||[]).length?eq.bars.map((b,i)=>chip(`${b.name} · ${b.kg} kg`,'bars',i)).join(''):none,
+     `<div class="chipadd"><input id="gyBarName" placeholder="e.g. EZ bar" aria-label="Bar name" style="flex:2"><input id="gyBarKg" type="number" step="0.5" min="1" inputmode="decimal" placeholder="kg" aria-label="Bar weight in kg" style="flex:1"><button class="btn sm sec" data-gyadd="bars">+ Add</button></div>`)}
+   ${sec('Plates',(eq.plates||[]).length?eq.plates.map((p,i)=>chip(`${p.kg} kg × ${p.n}`,'plates',i)).join(''):none,
+     `<div class="chipadd"><input id="gyPlKg" type="number" step="0.25" min="0.25" inputmode="decimal" placeholder="kg (e.g. 15)" aria-label="Plate weight in kg" style="flex:1"><input id="gyPlN" type="number" step="1" min="1" inputmode="numeric" placeholder="how many" aria-label="Number of plates" style="flex:1"><button class="btn sm sec" data-gyadd="plates">+ Add</button></div>`)}
+   ${sec('Dumbbells (pairs)',(eq.dumbbells||[]).length?eq.dumbbells.map((v,i)=>chip(v+' kg','dumbbells',i)).join(''):none,
+     `<div class="chipadd"><input id="gyDbNew" type="number" step="0.5" min="0.5" inputmode="decimal" placeholder="kg — e.g. 12.5" aria-label="New dumbbell weight in kg"><button class="btn sm sec" data-gyadd="dumbbells">+ Add</button></div>`)}
+   ${sec('Kettlebells',eq.kettlebells.length?eq.kettlebells.map((v,i)=>chip(v+' kg','kettlebells',i)).join(''):none,
+     `<div class="chipadd"><input id="gyKbNew" type="number" step="1" min="1" inputmode="decimal" placeholder="kg — e.g. 28" aria-label="New kettlebell weight in kg"><button class="btn sm sec" data-gyadd="kettlebells">+ Add</button></div>`)}
+   ${sec('Resistance bands',(eq.bands||[]).length?eq.bands.map((v,i)=>chip(v,'bands',i)).join(''):none,
+     `<div class="chipadd"><input id="gyBdNew" placeholder="e.g. extra-heavy" aria-label="New band"><button class="btn sm sec" data-gyadd="bands">+ Add</button></div>`)}
+   ${sec('Machines &amp; stations',(eq.gear||[]).length?eq.gear.map((v,i)=>chip(v,'gear',i)).join(''):none,
+     `<div class="chipadd"><input id="gyGrNew" placeholder="e.g. rowing machine" aria-label="New machine or station"><button class="btn sm sec" data-gyadd="gear">+ Add</button></div>`)}`;
+}
+async function saveEquip(){
+  EQUIP.plateKg=(EQUIP.plates||[]).reduce((s,p)=>s+p.kg*p.n,0);
+  if((EQUIP.plates||[]).length)EQUIP.microPlateKg=Math.min(...EQUIP.plates.map(p=>p.kg));
+  if((EQUIP.bars||[]).length)EQUIP.barKg=Math.max(...EQUIP.bars.map(b=>b.kg));
+  EQUIP.dbMaxKg=(EQUIP.dumbbells||[]).length?Math.max(...EQUIP.dumbbells):0;
+  await idbPut('kv',{k:'equipment',v:EQUIP});
+  renderGym();renderCoach();
 }
 async function renderWorkoutHistory(){
   const list=(await idbGetAll('workouts')).sort((a,b)=>a.date<b.date?1:(a.date>b.date?-1:b.ts-a.ts));
@@ -1307,21 +1401,43 @@ function drawSession(session,lastMap){
       <button class="addset" data-addset="${ei}">+ set</button></div>`;
   }).join('');
   openModal(`<div class="mh"><h3>${esc(session.title.split('—')[0].trim())}</h3><button class="x" onclick="closeModal()">✕</button></div>
-    <div class="sm muted" style="margin-bottom:4px">${esc(session.title)}</div>
+    <div class="sm muted" style="margin-bottom:4px">${esc(session.title)} · tick a set when done — rest timer starts, and a row lights up when you beat last session</div>
+    <div id="restTimer" class="resttimer hidden" role="timer"></div>
     <label class="fl">Date</label><input id="woDate" type="date" value="${session.date}">
     <div id="woBody">${body}</div>
     <label class="fl">Session notes</label><textarea id="woNotes" placeholder="Energy, niggles, PBs…">${esc(session.notes||'')}</textarea>
     <button class="btn" style="margin-top:14px" id="woSave">Save session</button>`);
   const root=$('#woBody');
   root.addEventListener('click',e=>{const a=e.target.closest('[data-addset]');if(a){const ei=+a.dataset.addset;const setsDiv=root.querySelector(`[data-ex="${ei}"] .sets`);const si=setsDiv.children.length;setsDiv.insertAdjacentHTML('beforeend',setRow(ei,si,{weight:'',reps:''}));return;}
+    const tk=e.target.closest('[data-tickset]');if(tk){const on=tk.classList.toggle('on');if(on){buzz();startRest(90);}return;}
     const d=e.target.closest('[data-delset]');if(d){d.closest('.setrow').remove();}});
+  // beat-last-session highlight: volt row when weight (or reps at same weight) beats last time's same set
+  root.addEventListener('input',e=>{
+    if(!e.target.matches('.setrow input'))return;
+    const exEl=e.target.closest('[data-ex]');if(!exEl)return;
+    const row=e.target.closest('.setrow');const sets=row.parentElement;if(!sets.classList.contains('sets'))return;
+    const si=[...sets.children].indexOf(row);
+    const prev=(lastMap&&lastMap[session.exercises[+exEl.dataset.ex].name]||[])[si];
+    const ins=row.querySelectorAll('input');const w=+ins[0].value||0,r=+ins[1].value||0;
+    row.classList.toggle('beat',!!(prev&&w&&r&&(w>+prev.weight||(w===+prev.weight&&r>+prev.reps))));
+  });
   $('#woSave').onclick=async()=>{
     session.date=$('#woDate').value;session.notes=$('#woNotes').value.trim();
     session.exercises.forEach((ex,ei)=>{const rows=$$(`[data-ex="${ei}"] .setrow`,root).filter(r=>r.querySelector('input'));
       ex.sets=rows.map(r=>{const ins=r.querySelectorAll('input');return{weight:ins[0].value,reps:ins[1].value};});});
     await idbPut('workouts',session);closeModal();buzz();toast('Session saved 💪');curDate=session.date;go('train');renderToday();};
 }
-function setRow(ei,si,s){return `<div class="setrow"><span class="si">${si+1}</span><input type="number" inputmode="decimal" placeholder="0" aria-label="Set ${si+1} weight, kg" value="${s.weight??''}"><input type="number" inputmode="numeric" placeholder="0" aria-label="Set ${si+1} reps" value="${s.reps??''}"><button class="del" data-delset aria-label="Remove set ${si+1}">✕</button></div>`;}
+function setRow(ei,si,s){return `<div class="setrow"><button type="button" class="si" data-tickset aria-label="Mark set ${si+1} done (starts rest timer)">${si+1}</button><input type="number" inputmode="decimal" placeholder="0" aria-label="Set ${si+1} weight, kg" value="${s.weight??''}"><input type="number" inputmode="numeric" placeholder="0" aria-label="Set ${si+1} reps" value="${s.reps??''}"><button class="del" data-delset aria-label="Remove set ${si+1}">✕</button></div>`;}
+
+let restInt=null;
+function startRest(sec){
+  clearInterval(restInt);const el=$('#restTimer');if(!el)return;
+  let t=sec;
+  const paint=()=>{el.textContent=`⏱ Rest ${Math.floor(t/60)}:${String(t%60).padStart(2,'0')} — tap to skip`;};
+  el.classList.remove('hidden');paint();
+  restInt=setInterval(()=>{t--;if(t<=0){clearInterval(restInt);el.classList.add('hidden');buzz();toast('Rest done — next set 💪');}else paint();},1000);
+  el.onclick=()=>{clearInterval(restInt);el.classList.add('hidden');};
+}
 async function openWorkout(id){const w=await idbGet('workouts',id);const all=(await idbGetAll('workouts')).filter(x=>x.dayKey===w.dayKey&&x.date<w.date).sort((a,b)=>a.date<b.date?1:-1);const lastMap={};if(all[0])all[0].exercises.forEach(e=>lastMap[e.name]=e.sets);drawSession(w,lastMap);}
 
 /* ============================ SETTINGS ============================ */
@@ -1335,6 +1451,7 @@ function settingsModal(){
    <label class="fl">Daily targets</label>
    <div class="in2"><div><span class="xs muted">Calories</span><input id="stK" type="number" value="${T.kcal}"></div><div><span class="xs muted">Protein g</span><input id="stP" type="number" value="${T.protein}"></div></div>
    <div class="in2" style="margin-top:8px"><div><span class="xs muted">Carbs g</span><input id="stC" type="number" value="${T.carbs}"></div><div><span class="xs muted">Fat g</span><input id="stF" type="number" value="${T.fat}"></div></div>
+   <div class="in2" style="margin-top:8px"><div><span class="xs muted">Training-day kcal (optional)</span><input id="stKT" type="number" inputmode="numeric" placeholder="e.g. 2300" value="${T.kcalTrain||''}"></div><div><span class="xs muted">&nbsp;</span><span class="xs muted" style="display:block;padding-top:12px">Used on Mon/Wed/Fri &amp; logged-workout days</span></div></div>
    <div class="in2" style="margin-top:10px"><div><label class="fl">Start weight (kg)</label><input id="stSW" type="number" step="0.1" value="${SET.startWeight}"></div><div><label class="fl">Goal weight (kg)</label><input id="stGW" type="number" step="0.1" value="${SET.goalWeight}"></div></div>
    <label class="fl">Cloud sync (Supabase — optional)</label>
    <input id="sbUrl" placeholder="Project URL (https://xxxx.supabase.co)" value="${esc(SET.sync?.url||'')}">
@@ -1381,7 +1498,7 @@ function settingsModal(){
     try{const n=await syncNow();$('#sbStatus').textContent='Synced ✓ '+new Date().toLocaleTimeString();toast(n?`Synced — ${n} update${n>1?'s':''} pulled`:'Synced ✓');go(curView);}
     catch(err){$('#sbStatus').textContent='Sync failed';toast('Sync failed: '+err.message);}
   };
-  $('#stSave').onclick=async()=>{SET.targets={kcal:+$('#stK').value||0,protein:+$('#stP').value||0,carbs:+$('#stC').value||0,fat:+$('#stF').value||0};SET.startWeight=+$('#stSW').value||83;SET.goalWeight=+$('#stGW').value||76.5;SET.aiKey=$('#stAI').value.trim();readSyncFields();await saveSettings();closeModal();toast('Settings saved');renderToday();if(curView==='plan')renderPlan();syncSoon();};
+  $('#stSave').onclick=async()=>{SET.targets={kcal:+$('#stK').value||0,protein:+$('#stP').value||0,carbs:+$('#stC').value||0,fat:+$('#stF').value||0,kcalTrain:+$('#stKT').value||null};SET.startWeight=+$('#stSW').value||83;SET.goalWeight=+$('#stGW').value||76.5;SET.aiKey=$('#stAI').value.trim();readSyncFields();await saveSettings();closeModal();toast('Settings saved');renderToday();if(curView==='plan')renderPlan();syncSoon();};
   $('#stExport').onclick=exportData;
   $('#stImport').onclick=()=>$('#stFile').click();
   $('#stFile').onchange=importData;
@@ -1435,6 +1552,7 @@ function go(view){
   if(view==='photos')renderPhotos();
   if(view==='train'){renderTrainStart();renderWorkoutHistory();}
   if(view==='plan')renderPlan();
+  if(view==='gym')renderGym();
 }
 
 /* ---------- global events ---------- */
@@ -1458,18 +1576,43 @@ document.addEventListener('click',async e=>{
   const di=t.closest('[data-dismissinsight]');if(di){
     const rec=(await idbGet('kv','insightDismissals'))||{k:'insightDismissals',v:{}};
     rec.v[di.dataset.dismissinsight]=todayStr();await idbPut('kv',rec);renderCoach();return;}
+  const el2=t.closest('[data-editlog]');if(el2){editLogModal(el2.dataset.editlog);return;}
   const rp=t.closest('[data-repeatday]');if(rp){const d=parseD(curDate);d.setDate(d.getDate()-1);const prevDay=dstr(d);
     const prev=await idbByDate('log',prevDay);
     if(!prev.length){toast('Nothing logged on '+niceDate(prevDay));return;}
     for(const en of prev)await idbPut('log',{...en,id:uid(),date:curDate,ts:Date.now()});
     buzz();toast(`Copied ${prev.length} item${prev.length>1?'s':''} from ${niceDate(prevDay)}`);renderToday();return;}
+  const cr=t.closest('[data-crange]');if(cr){chartRange=+cr.dataset.crange;
+    $$('[data-crange]').forEach(b=>b.classList.toggle('on',b===cr));renderBody();return;}
   const eme=t.closest('[data-editmeas]');if(eme){addMeasureModal(eme.dataset.editmeas);return;}
   const dme=t.closest('[data-delmeas]');if(dme){if(confirm('Delete measurement?')){await idbDel('measurements',dme.dataset.delmeas);renderBody();}return;}
   const ph=t.closest('[data-photo]');if(ph){viewPhotoModal(ph.dataset.photo);return;}
   const dp=t.closest('[data-delphoto]');if(dp){await idbDel('photos',dp.dataset.delphoto);closeModal();renderPhotos();return;}
   const edd=t.closest('[data-editday]');if(edd){editDayModal(edd.dataset.editday);return;}
   if(t.closest('[data-addday]')){editDayModal(null);return;}
-  if(t.closest('#gymBtn')){gymModal();return;}
+  if(t.closest('#gymBtn')){go('gym');return;}
+  if(t.closest('#gymBack')){go('train');return;}
+  const gyr=t.closest('[data-gyrm]');if(gyr){
+    const[cat,i]=gyr.dataset.gyrm.split(':');EQUIP[cat].splice(+i,1);await saveEquip();toast('Removed');return;}
+  const gya=t.closest('[data-gyadd]');if(gya){
+    const cat=gya.dataset.gyadd;
+    if(cat==='bars'){const name=$('#gyBarName').value.trim(),kg=+$('#gyBarKg').value;
+      if(!name||!(kg>0))return toast('Bar name + weight needed');
+      EQUIP.bars.push({name,kg});EQUIP.bars.sort((a,b)=>a.kg-b.kg);}
+    else if(cat==='plates'){const kg=+$('#gyPlKg').value,n=+$('#gyPlN').value||2;
+      if(!(kg>0))return toast('Enter the plate weight');
+      const ex=EQUIP.plates.find(p=>p.kg===kg);
+      if(ex)ex.n+=n;else EQUIP.plates.push({kg,n});
+      EQUIP.plates.sort((a,b)=>a.kg-b.kg);}
+    else if(cat==='dumbbells'||cat==='kettlebells'){
+      const v=+$(cat==='dumbbells'?'#gyDbNew':'#gyKbNew').value;
+      if(!(v>0))return toast('Enter a weight');
+      if(EQUIP[cat].includes(v))return toast('Already in your gym');
+      EQUIP[cat].push(v);EQUIP[cat].sort((a,b)=>a-b);}
+    else{const v=$(cat==='bands'?'#gyBdNew':'#gyGrNew').value.trim();
+      if(!v)return toast('Type a name');
+      EQUIP[cat].push(v);}
+    await saveEquip();toast('Added ✓');return;}
   const sd=t.closest('[data-startday]');if(sd){startSession(sd.dataset.startday);return;}
   const ow=t.closest('[data-openwo]');if(ow){openWorkout(ow.dataset.openwo);return;}
   if(t.closest('#helpBtn')){go('plan');return;}
@@ -1487,12 +1630,23 @@ document.addEventListener('keydown',e=>{
   // activate clickable rows (role="button" divs) with Enter/Space
   if((e.key==='Enter'||e.key===' ')&&e.target instanceof Element&&e.target.matches('div[role="button"]')){e.preventDefault();e.target.click();}
 });
+$('#weightChart').addEventListener('click',e=>{
+  const r=e.target.getBoundingClientRect();const cx=e.clientX-r.left,cy=e.clientY-r.top;
+  const tip=$('#chartTip');let best=null,bd=28;
+  for(const p of chartPts){const d=Math.abs(p.cssX-cx);if(d<bd){bd=d;best=p;}}
+  if(!best){tip.classList.add('hidden');return;}
+  tip.textContent=`${niceDate(best.date)} · ${best.weight} kg`;
+  tip.style.left=Math.min(Math.max(best.cssX-50,4),r.width-110)+'px';
+  tip.style.top=Math.max(best.cssY-38,2)+'px';
+  tip.classList.remove('hidden');
+  clearTimeout(tip._t);tip._t=setTimeout(()=>tip.classList.add('hidden'),2500);
+});
 $('#prevDay').onclick=()=>{const d=parseD(curDate);d.setDate(d.getDate()-1);curDate=dstr(d);renderToday();};
 $('#nextDay').onclick=()=>{const d=parseD(curDate);d.setDate(d.getDate()+1);curDate=dstr(d);renderToday();};
 window.closeModal=closeModal;
 
 /* ---------- init ---------- */
-const MEAL_SEED_VERSION=2;
+const MEAL_SEED_VERSION=3; // v3: restore seed meals wrongly deleted by pre-LWW sync tombstones (2026-07-29)
 async function seedIfEmpty(){
   const f=await idbGetAll('foods');if(!f.length)for(const x of SEED_FOODS)await idbPut('foods',x);
   // program & equipment: seed once, then they're user data (edited in-app, synced)

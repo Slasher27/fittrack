@@ -144,6 +144,11 @@ v2 added the `water` store; migrations run in `onupgradeneeded`, whose
 (last-write-wins). `idbPut` stamps `up` (ms timestamp) and `idbDel` records a
 tombstone in `kv.tombstones`; pulled changes pass `fromSync=true` to bypass
 stamping. **Always mutate through these helpers** or records won't sync.
+**Deletes are last-write-wins too**: a pulled tombstone only applies if it is
+newer than the local record, and the push payload is deduped by `(store,id)`
+keeping the newest row — both essential for the seed-reseed flow (delete +
+re-put of the same ids), learned the hard way on 2026-07-29 when stale
+tombstones deleted seed meals across devices.
 Photos and `kv` are device-local. Sync credentials live in `SET.sync` and are
 stripped from backups. The service worker must never intercept cross-origin
 requests (see the origin check in `service-worker.js`).
