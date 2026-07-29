@@ -1194,12 +1194,51 @@ async function renderFood(){
     if(top.length)recent=`<div class="grp">⭐ Frequent</div>`+top.map(id=>foodRow(fm[id])).join('');
   }
   foods=foods.filter(f=>f.name.toLowerCase().includes(q));
-  if(!foods.length){root.innerHTML=`<div class="empty"><span class="ic">🍽️</span>${foodSeg==='mine'?'No custom foods yet. Tap “Custom food”.':'No matches.'}</div>`;return;}
+  const offBtn=q?`<button class="btn sec sm" id="offSearchBtn" style="width:100%;margin-top:10px">🌐 Search online for “${esc(q)}”</button>`:'';
+  if(!foods.length){root.innerHTML=`<div class="empty"><span class="ic">🍽️</span>${foodSeg==='mine'?'No custom foods yet. Tap “Custom food”.':'No matches in your library.'}</div>`+offBtn;return;}
   const groups={};foods.forEach(f=>{(groups[f.group]=groups[f.group]||[]).push(f);});
-  const gorder=['Protein','Dairy','Carbs','Fruit','Veg','Fats','Other'];
+  const gorder=['Protein','Dairy','Carbs','Fruit','Veg','Fats','Other','Online'];
   let h=recent;for(const g of gorder){if(!groups[g])continue;h+=`<div class="grp">${g}</div>`;
     groups[g].forEach(f=>{h+=foodRow(f);});}
-  root.innerHTML=h;
+  root.innerHTML=h+offBtn;
+}
+
+/* ---------- Online food search (Open Food Facts — free, no key) ----------
+   Optional network feature: only runs when the user explicitly taps
+   "Search online". Imported products become custom foods (per-100 g macros),
+   so they sync, survive seed upgrades, and work offline forever after.
+   Only the typed search term is sent. */
+let OFF_RESULTS=[];
+async function offSearch(q){
+  const root=$('#foodList');
+  root.innerHTML=`<div class="empty"><span class="ic">🌐</span>Searching Open Food Facts…</div>`;
+  let products;
+  try{
+    const res=await fetch('https://world.openfoodfacts.org/cgi/search.pl?search_terms='+encodeURIComponent(q)+'&search_simple=1&action=process&json=1&page_size=20&fields=code,product_name,brands,nutriments');
+    if(!res.ok)throw new Error(res.status);
+    products=(await res.json()).products||[];
+  }catch(e){
+    toast('Online search failed — check your connection');renderFood();return;
+  }
+  const r1=x=>Math.round(x*10)/10;
+  OFF_RESULTS=products.map(p=>{
+    const n=p.nutriments||{};
+    const kcal=n['energy-kcal_100g']??(n.energy_100g?n.energy_100g/4.184:null);
+    if(!p.product_name||kcal==null||n.proteins_100g==null)return null;
+    return{name:p.product_name.trim()+(p.brands?` (${p.brands.split(',')[0].trim()})`:''),
+      kcal:r1(kcal),protein:r1(n.proteins_100g||0),carbs:r1(n.carbohydrates_100g||0),fat:r1(n.fat_100g||0)};
+  }).filter(Boolean);
+  if(!OFF_RESULTS.length){root.innerHTML=`<div class="empty"><span class="ic">🌐</span>No online matches with usable nutrition data.</div><button class="btn ghost sm" id="offBackBtn" style="width:100%;margin-top:10px">‹ Back to library</button>`;return;}
+  root.innerHTML=`<div class="grp">🌐 Online results — per 100 g · tap + to add</div>`+
+    OFF_RESULTS.map((f,i)=>`<div class="foodrow"><div><div class="fn">${esc(f.name)}</div><div class="fs">100 g · ${rnd(f.protein)}P ${rnd(f.carbs)}C ${rnd(f.fat)}F</div></div><div class="row" style="gap:7px"><div class="fk">${rnd(f.kcal)}<br>kcal</div><button class="pillbtn" data-offadd="${i}" aria-label="Add ${esc(f.name)} to library">＋</button></div></div>`).join('')+
+    `<button class="btn ghost sm" id="offBackBtn" style="width:100%;margin-top:10px">‹ Back to library</button>`;
+}
+async function addOffFood(i){
+  const f=OFF_RESULTS[i];if(!f)return;
+  const food={id:uid(),name:f.name,group:'Online',serving:'100 g',kcal:f.kcal,protein:f.protein,carbs:f.carbs,fat:f.fat,custom:true};
+  await idbPut('foods',food);
+  toast('Added to your library');
+  logFoodModal(food.id);
 }
 
 /* ---------- Log food modal ---------- */
@@ -1818,6 +1857,9 @@ document.addEventListener('click',async e=>{
   const nav=t.closest('[data-nav]');if(nav){go(nav.dataset.nav);return;}
   const q=t.closest('[data-quick]');if(q){const k=q.dataset.quick;if(k==='food'){go('food');foodSeg='library';renderFood();}else if(k==='meal'){go('food');foodSeg='meals';renderFood();}else if(k==='weight')addMeasureModal();else if(k==='train')go('train');return;}
   const seg=t.closest('[data-fseg]');if(seg){foodSeg=seg.dataset.fseg;renderFood();return;}
+  if(t.closest('#offSearchBtn')){offSearch($('#foodSearch').value.trim());return;}
+  if(t.closest('#offBackBtn')){renderFood();return;}
+  const oa=t.closest('[data-offadd]');if(oa){addOffFood(+oa.dataset.offadd);return;}
   // inner action buttons first — they live inside clickable [data-logfood]/[data-logmeal] rows
   const df=t.closest('[data-delfood]');if(df){if(confirm('Delete this food?')){await idbDel('foods',df.dataset.delfood);renderFood();}return;}
   const dm=t.closest('[data-delmeal]');if(dm){if(confirm('Delete this meal?')){await idbDel('meals',dm.dataset.delmeal);renderFood();}return;}

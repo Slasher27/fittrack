@@ -20,12 +20,14 @@ protein target).
   HTML/CSS/JS. There is no npm, no bundler, no framework, no transpile step.
   You edit the source files and they run as-is.
 - **Local-first.** All user data lives in the browser's **IndexedDB** and every
-  feature works fully offline. Two *optional, opt-in* network integrations
-  exist (both configured in Settings, both degrade gracefully offline):
-  **Supabase cloud sync** (multi-device data; see `SETUP-SYNC.md` and §4.2 —
-  always write through `idbPut`/`idbDel` so records get sync stamps) and the
-  **AI assistant** (Anthropic API). Never add a network dependency to a core
-  flow.
+  feature works fully offline. Three *optional, opt-in* network integrations
+  exist (all degrade gracefully offline): **Supabase cloud sync** (multi-device
+  data; see `SETUP-SYNC.md` and §4.2 — always write through `idbPut`/`idbDel`
+  so records get sync stamps), the **AI assistant** (Anthropic API, key in
+  Settings), and **online food search** (Open Food Facts, no key — runs only
+  when the user taps "Search online" in the Food tab; imports become custom
+  foods with per-100 g macros, so they sync and work offline afterwards). Never
+  add a network dependency to a core flow.
 - **Installable PWA.** Manifest + service worker make it installable to a phone
   home screen and usable with no connection.
 - **Single-file app logic.** Essentially the entire application (markup, styles,
