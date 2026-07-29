@@ -132,12 +132,15 @@ v2 added the `water` store; migrations run in `onupgradeneeded`, whose
 | `log` | `id` | `date` | `{id, date:'YYYY-MM-DD', meal:'breakfast'|'lunch'|'snack'|'dinner', foodId, name, serving, servings, kcal, protein, carbs, fat, ts}` |
 | `measurements` | `id` | `date` | `{id, date, weight, waist, chest, arm, thigh, notes}` |
 | `photos` | `id` | `date` | `{id, date, category:'Front'|'Side'|'Back', note, blob:Blob, ts}` |
-| `workouts` | `id` | `date` | `{id, date, dayKey:'A'|'B'|'C', title, notes, ts, exercises:[{name, target, sets:[{weight, reps}]}]}` |
+| `workouts` | `id` | `date` | `{id, date, dayKey:'A'|'B'|'C', title, notes, ts, exercises:[{name, target, mode:'reps'|'time', rest?, sets:[{weight, reps, done?} \| {secs, done?}]}]}` — `mode:'time'` = interval work logged in seconds (e.g. skipping) |
 | `water` | `id` | `date` | `{id, date, ml, ts}` — one row per +250/+500 tap; daily total is the sum (target `WATER_TARGET_ML` = 3000) |
 
 `kv` singletons:
 - `{k:'settings', targets:{kcal, protein, carbs, fat}, goalWeight, startWeight}`
 - `{k:'mealSeedVersion', v:<int>}` — see §5.
+- `{k:'woDraft', v:<session>}` — the in-progress workout, auto-saved on every
+  keystroke/tick while logging (deliberately device-local, never synced);
+  cleared by "Finish session". Train tab + `startSession` offer to resume it.
 
 **Cloud sync (optional):** stores in `SYNC_STORES` (`foods`, `meals`, `log`,
 `measurements`, `workouts`, `water`) sync to a single generic Supabase `records` table
@@ -180,9 +183,13 @@ so logging is a decimal multiplier (e.g. 180 g chicken = `1.8` servings of a
   name, items[]]`. Plus lookup consts `DAY_FULL`, `DAY_ORDER`, `SLOT_ORDER`,
   `SLOT_KEY`.
 - **`DEFAULT_PROGRAM`** — seed for the training program. At runtime the program
-  is **user data**: kv key `program` (`{days:{A:{title,ex:[{name,target,type}]}},
-  schedule:{Mon:'A',…}}`), loaded into the `PROG` global and edited in-app
-  (Train → ✎ per day, + Add day). `type` (one of `EX_TYPES`) drives the
+  is **user data**: kv key `program` (`{days:{A:{title,ex:[{name,target,type,
+  mode,rest}]}}, schedule:{Mon:'A',…}}`), loaded into the `PROG` global and
+  edited in-app (Train → ✎ per day, + Add day). `mode:'reps'|'time'` picks the
+  set-row layout (kg × reps vs seconds) and `rest` the per-exercise rest-timer
+  seconds; `loadProgram()` migrates missing `mode`/`rest` **in-memory only** —
+  never idbPut from a migration, or a mere page load would out-stamp a newer
+  synced program (LWW). `type` (one of `EX_TYPES`) drives the
   Coach's progression advice. Equipment likewise: kv key `equipment` →
   `EQUIP` global, edited via Train → 🎒 My gym. Both kv keys sync across
   devices (`SYNCED_KV`); seeded only when absent — never overwrite user edits.

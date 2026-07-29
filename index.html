@@ -343,7 +343,7 @@ const DEFAULT_PROGRAM={
     {name:'Deadlift',target:'4 × 4–5',type:'barbell-lower'},{name:'Overhead Press',target:'3 × 6–8',type:'barbell-upper'},
     {name:'Barbell Row',target:'3 × 8–10',type:'barbell-upper'},{name:'Weighted Dips',target:'3 × 8–10',type:'bodyweight'},
     {name:'Lat Pulldown',target:'3 × 12',type:'other'},{name:'Lateral Raise',target:'3 × 15',type:'dumbbell'},
-    {name:'Skipping intervals',target:'8 × 40s',type:'other'}]},
+    {name:'Skipping intervals',target:'8 × 40s',type:'other',mode:'time',rest:20}]},
   C:{title:'Day C — Full body (Fri)',ex:[
     {name:'Front Squat',target:'3 × 6–8',type:'barbell-lower'},{name:'Incline Bench Press',target:'3 × 8–10',type:'barbell-upper'},
     {name:'Chin-ups',target:'3 × AMRAP',type:'bodyweight'},{name:'KB Single-leg RDL',target:'3 × 10–12',type:'kettlebell'},
@@ -596,6 +596,13 @@ async function loadProgram(){
   if(!EQUIP.bands)EQUIP.bands=DEFAULT_EQUIPMENT.bands.slice();
   if(!EQUIP.gear)EQUIP.gear=DEFAULT_EQUIPMENT.gear.slice();
   if(!EQUIP.barKg)EQUIP.barKg=20;
+  // migrate pre-mode programs: interval-style exercises log seconds, not kg × reps.
+  // In-memory only — never idbPut here, or a mere page load would out-stamp a
+  // genuinely newer program from another device (LWW).
+  for(const d of Object.values(PROG.days))for(const e of d.ex){
+    if(!e.mode)e.mode=/\d\s*s\b/i.test(e.target)||/skip|interval|plank|hold/i.test(e.name)?'time':'reps';
+    if(e.mode==='time'&&e.rest==null)e.rest=/skip/i.test(e.name)?20:30;
+  }
 }
 async function saveSettings(){await idbPut('kv',SET);}
 
@@ -911,6 +918,13 @@ function progressionAdvice(name,target,sets){ // double progression: all sets at
     default:return `all sets hit ${top} reps — progress reps, slow the tempo, or move to a harder variation`;
   }
 }
+function progEx(name){for(const d of Object.values(PROG.days))for(const e of d.ex)if(e.name===name)return e;return null;}
+function timedAdvice(ex,last){ // interval progression: hit every interval at target → extend
+  const done=(last||[]).filter(s=>+s.secs>0);if(!done.length)return null;
+  const tgt=+((String(ex.target).match(/(\d+)\s*s/)||[])[1])||0;
+  if(tgt&&done.every(s=>+s.secs>=tgt))return `all intervals hit ${tgt} s — add an interval, go to ${tgt+5} s, or trim the rest`;
+  return null;
+}
 
 async function computeStats(){
   const[logs,meas,wos,photos,waterToday]=await Promise.all([idbGetAll('log'),idbGetAll('measurements'),idbGetAll('workouts'),idbGetAll('photos'),idbByDate('water',todayStr())]);
@@ -1053,7 +1067,7 @@ async function renderToday(){
   const meas=(await idbByDate('measurements',curDate))[0];
   let sum='';
   if(meas){sum+=`<div class="card"><div class="row between"><div><span class="badge">⚖️ Weigh-in</span> <b style="margin-left:6px">${meas.weight??'–'} kg</b>${meas.waist?` · waist ${meas.waist} cm`:''}</div></div></div>`;}
-  if(wos.length){wos.forEach(w=>{const done=w.exercises.reduce((n,e)=>n+e.sets.filter(s=>s.reps).length,0);sum+=`<div class="card sessioncard"><div class="row between"><div><span class="badge">🏋️ ${esc(w.title.split('—')[0].trim())}</span> <span class="sm muted">${done} sets logged</span></div><button class="pillbtn" data-openwo="${w.id}">View</button></div></div>`;});}
+  if(wos.length){wos.forEach(w=>{const done=w.exercises.reduce((n,e)=>n+e.sets.filter(s=>s.reps||s.secs).length,0);sum+=`<div class="card sessioncard"><div class="row between"><div><span class="badge">🏋️ ${esc(w.title.split('—')[0].trim())}</span> <span class="sm muted">${done} sets logged</span></div><button class="pillbtn" data-openwo="${w.id}">View</button></div></div>`;});}
   $('#todaySummary').innerHTML=sum;
 
   // food entries by meal
@@ -1449,8 +1463,10 @@ function viewPhotoModal(id){idbGet('photos',id).then(p=>{
 });}
 
 /* ============================ TRAIN ============================ */
-function renderTrainStart(){
-  $('#dayBtns').innerHTML=Object.entries(PROG.days).map(([k,v])=>
+async function renderTrainStart(){
+  const draft=(await idbGet('kv','woDraft'))?.v;
+  const resume=draft&&PROG.days[draft.dayKey]?`<button class="btn" style="width:100%;margin-bottom:8px" data-startday="${draft.dayKey}">⏵ Resume ${esc(draft.title.split('—')[0].trim())} — unfinished session</button>`:'';
+  $('#dayBtns').innerHTML=resume+Object.entries(PROG.days).map(([k,v])=>
     `<div class="row" style="gap:8px"><button class="btn sec" style="flex:1;text-align:left" data-startday="${k}">▶︎ ${esc(v.title)}</button><button class="pillbtn" data-editday="${k}" aria-label="Edit ${esc(v.title)}" style="align-self:stretch">✎</button></div>`).join('')
     +`<div class="btnrow" style="margin-top:6px"><button class="btn ghost sm" data-addday style="width:100%">+ Add day</button><button class="btn ghost sm" id="gymBtn" style="width:100%">🎒 My gym</button></div>`;
 }
@@ -1472,21 +1488,24 @@ function editDayModal(key){
      <input id="pdTarget" placeholder="e.g. 3 × 8–10" style="flex:1">
    </div>
    <div class="row" style="gap:6px;margin-top:6px">
-     <select id="pdType" aria-label="Equipment type" style="flex:1">${EX_TYPES.map(t=>`<option>${t}</option>`).join('')}</select>
+     <select id="pdType" aria-label="Equipment type" style="flex:1.2">${EX_TYPES.map(t=>`<option>${t}</option>`).join('')}</select>
+     <select id="pdMode" aria-label="Logged as" style="flex:1"><option value="reps">kg × reps</option><option value="time">timed (s)</option></select>
+     <input id="pdRest" type="number" inputmode="numeric" placeholder="rest s" aria-label="Rest seconds" style="flex:.7">
      <button class="btn sm sec" id="pdAdd" style="flex:none">Add</button>
    </div>
    ${!isNew&&Object.keys(PROG.days).length>1?`<button class="btn danger sm" id="pdDelete" style="margin-top:12px;width:100%">Delete this day</button>`:''}
    <button class="btn" style="margin-top:10px" id="pdSave">${isNew?'Create day':'Save changes'}</button>`);
   const draw=()=>{$('#pdList').innerHTML=day.ex.length?day.ex.map((e,i)=>
-    `<div class="entry"><div><div class="n">${esc(e.name)}</div><div class="s">${esc(e.target)} · ${esc(e.type||'other')}</div></div><div class="row" style="gap:6px">${i>0?`<button class="pillbtn" data-up="${i}" aria-label="Move ${esc(e.name)} up">↑</button>`:''}<button class="pillbtn" data-rm="${i}" aria-label="Remove ${esc(e.name)}">✕</button></div></div>`).join('')
+    `<div class="entry"><div><div class="n">${esc(e.name)}</div><div class="s">${esc(e.target)} · ${esc(e.type||'other')}${e.mode==='time'?' · timed':''}${e.rest?` · rest ${e.rest}s`:''}</div></div><div class="row" style="gap:6px">${i>0?`<button class="pillbtn" data-up="${i}" aria-label="Move ${esc(e.name)} up">↑</button>`:''}<button class="pillbtn" data-rm="${i}" aria-label="Remove ${esc(e.name)}">✕</button></div></div>`).join('')
     :'<p class="sm muted">No exercises yet — add some below.</p>';};
   draw();
   $('#pdList').onclick=e=>{
     const u=e.target.closest('[data-up]');if(u){const i=+u.dataset.up;[day.ex[i-1],day.ex[i]]=[day.ex[i],day.ex[i-1]];draw();return;}
     const r=e.target.closest('[data-rm]');if(r){day.ex.splice(+r.dataset.rm,1);draw();}};
   $('#pdAdd').onclick=()=>{const n=$('#pdName').value.trim();if(!n)return toast('Enter an exercise name');
-    day.ex.push({name:n,target:$('#pdTarget').value.trim()||'3 × 8–10',type:$('#pdType').value});
-    $('#pdName').value='';$('#pdTarget').value='';draw();};
+    const mode=$('#pdMode').value;
+    day.ex.push({name:n,target:$('#pdTarget').value.trim()||(mode==='time'?'8 × 40s':'3 × 8–10'),type:$('#pdType').value,mode,rest:+$('#pdRest').value||(mode==='time'?30:undefined)});
+    $('#pdName').value='';$('#pdTarget').value='';$('#pdRest').value='';draw();};
   const del=$('#pdDelete');if(del)del.onclick=async()=>{
     if(!confirm('Delete this training day? Past logged sessions are kept.'))return;
     delete PROG.days[k];
@@ -1540,67 +1559,125 @@ async function saveEquip(){
 }
 async function renderWorkoutHistory(){
   const list=(await idbGetAll('workouts')).sort((a,b)=>a.date<b.date?1:(a.date>b.date?-1:b.ts-a.ts));
-  $('#workoutHistory').innerHTML=list.length?list.map(w=>{const sets=w.exercises.reduce((n,e)=>n+e.sets.filter(s=>s.reps).length,0);const vol=w.exercises.reduce((v,e)=>v+e.sets.reduce((x,s)=>x+((+s.weight||0)*(+s.reps||0)),0),0);
+  $('#workoutHistory').innerHTML=list.length?list.map(w=>{const sets=w.exercises.reduce((n,e)=>n+e.sets.filter(s=>s.reps||s.secs).length,0);const vol=w.exercises.reduce((v,e)=>v+e.sets.reduce((x,s)=>x+((+s.weight||0)*(+s.reps||0)),0),0);
     return `<div class="card sessioncard" role="button" tabindex="0" data-openwo="${w.id}"><div class="row between"><div><b>${esc(w.title.split('—')[0].trim())}</b><div class="sm muted">${niceDate(w.date)} · ${sets} sets · ${rnd(vol)} kg volume</div></div><span class="pillbtn">View ›</span></div></div>`;}).join(''):`<div class="empty"><span class="ic">🏋️</span>No sessions logged yet.</div>`;
 }
 async function startSession(dayKey,existing){
   const prog=PROG.days[dayKey];if(!prog)return toast('That training day no longer exists');
+  // in-progress draft? Same day resumes it; different day asks before discarding.
+  const draft=existing?null:(await idbGet('kv','woDraft'))?.v;
+  if(draft&&draft.dayKey!==dayKey){
+    if(confirm(`You have an unfinished "${draft.title.split('—')[0].trim()}" session. Discard it and start ${prog.title.split('—')[0].trim()}?`))await idbDel('kv','woDraft');
+    else return startSession(draft.dayKey);
+  }
   // find last session of this day for prefill
   const all=(await idbGetAll('workouts')).filter(w=>w.dayKey===dayKey&&(!existing||w.id!==existing.id)).sort((a,b)=>a.date<b.date?1:-1);
   const last=all[0];
   const lastMap={};if(last)last.exercises.forEach(e=>lastMap[e.name]=e.sets);
-  let session=existing||{id:uid(),date:todayStr(),dayKey,title:prog.title,notes:'',ts:Date.now(),
+  let session;
+  if(draft&&draft.dayKey===dayKey){session=draft;toast('Resumed your unfinished session');}
+  else session=existing||{id:uid(),date:todayStr(),dayKey,title:prog.title,notes:'',ts:Date.now(),
     exercises:prog.ex.map(e=>{const prev=lastMap[e.name];const n=prev?prev.length:parseInt(e.target)||3;
-      return{name:e.name,target:e.target,sets:Array.from({length:n},(_,i)=>({weight:prev&&prev[i]?prev[i].weight:'',reps:''}))};})};
-  drawSession(session,lastMap);
+      return{name:e.name,target:e.target,mode:e.mode||'reps',rest:e.rest,
+        sets:Array.from({length:n},(_,i)=>e.mode==='time'?{secs:''}:{weight:prev&&prev[i]?prev[i].weight:'',reps:''})};})};
+  drawSession(session,lastMap,!existing);
 }
-function drawSession(session,lastMap){
-  const body=session.exercises.map((ex,ei)=>{
+function drawSession(session,lastMap,drafting){
+  // sessions saved before modes existed: pull mode/rest from today's program
+  session.exercises.forEach(ex=>{const pe=progEx(ex.name);if(!ex.mode)ex.mode=pe?.mode||'reps';if(ex.rest==null&&pe)ex.rest=pe.rest;});
+  const phFor=(ex,si)=>{const prev=(lastMap&&lastMap[ex.name]||[])[si]||{};
+    return ex.mode==='time'?{secs:prev.secs||+((String(ex.target).match(/(\d+)\s*s/)||[])[1])||''}:{reps:prev.reps||''};};
+  const bodyHtml=()=>session.exercises.map((ex,ei)=>{
+    const timed=ex.mode==='time';
     const last=lastMap&&lastMap[ex.name];
-    const lastTxt=last&&last.some(s=>s.weight||s.reps)?`Last: ${last.map(s=>`${s.weight||'–'}×${s.reps||'–'}`).join(', ')}`:'';
-    const adv=last?progressionAdvice(ex.name,ex.target,last):null;
-    return `<div data-ex="${ei}"><div class="exhead"><span class="en">${esc(ex.name)}</span><span class="et">target ${esc(ex.target)}</span></div>
+    const lastTxt=last&&last.some(s=>s.weight||s.reps||s.secs)?`Last: ${last.map(s=>timed?`${s.secs||'–'}s`:`${s.weight||'–'}×${s.reps||'–'}`).join(', ')}`:'';
+    const adv=last?(timed?timedAdvice(ex,last):progressionAdvice(ex.name,ex.target,last)):null;
+    return `<div data-ex="${ei}"><div class="exhead"><span class="en">${esc(ex.name)}</span><span class="et">${ex.target?`target ${esc(ex.target)}`:''}${ex.rest?` · rest ${ex.rest}s`:''}</span></div>
       ${lastTxt?`<div class="lasthint">${esc(lastTxt)}${adv?` — <b>↑ ${esc(adv)}</b>`:''}</div>`:''}
-      <div class="setrow" style="color:var(--muted);font-size:11px;font-weight:700"><span class="si">#</span><span>KG</span><span>REPS</span><span></span></div>
-      <div class="sets">${ex.sets.map((s,si)=>setRow(ei,si,s)).join('')}</div>
-      <button class="addset" data-addset="${ei}">+ set</button></div>`;
+      <div class="setrow${timed?' time':''}" style="color:var(--muted);font-size:11px;font-weight:700"><span class="si">#</span>${timed?'<span>SECONDS</span>':'<span>KG</span><span>REPS</span>'}<span></span></div>
+      <div class="sets">${ex.sets.map((s,si)=>setRow(ei,si,s,ex,phFor(ex,si))).join('')}</div>
+      <button class="addset" data-addset="${ei}">+ ${timed?'interval':'set'}</button></div>`;
   }).join('');
   openModal(`<div class="mh"><h3>${esc(session.title.split('—')[0].trim())}</h3><button class="x" onclick="closeModal()">✕</button></div>
-    <div class="sm muted" style="margin-bottom:4px">${esc(session.title)} · tick a set when done — rest timer starts, and a row lights up when you beat last session</div>
+    <div class="sm muted" style="margin-bottom:4px">${esc(session.title)} · tick a set when done — it fills in "same as last time", starts the rest, and lights up when you beat last session${drafting?' · progress auto-saves':''}</div>
     <div id="restTimer" class="resttimer hidden" role="timer"></div>
     <label class="fl">Date</label><input id="woDate" type="date" value="${session.date}">
-    <div id="woBody">${body}</div>
+    <div id="woBody">${bodyHtml()}</div>
+    <div class="row" style="gap:6px;margin-top:10px"><input id="woNewEx" placeholder="Add an exercise (swap / extra)" style="flex:1"><button class="btn sm sec" id="woAddEx" style="flex:none">Add</button></div>
     <label class="fl">Session notes</label><textarea id="woNotes" placeholder="Energy, niggles, PBs…">${esc(session.notes||'')}</textarea>
-    <button class="btn" style="margin-top:14px" id="woSave">Save session</button>`);
+    <button class="btn" style="margin-top:14px" id="woSave">${drafting?'Finish session':'Save changes'}</button>`);
   const root=$('#woBody');
-  root.addEventListener('click',e=>{const a=e.target.closest('[data-addset]');if(a){const ei=+a.dataset.addset;const setsDiv=root.querySelector(`[data-ex="${ei}"] .sets`);const si=setsDiv.children.length;setsDiv.insertAdjacentHTML('beforeend',setRow(ei,si,{weight:'',reps:''}));return;}
-    const tk=e.target.closest('[data-tickset]');if(tk){const on=tk.classList.toggle('on');if(on){buzz();startRest(90);}return;}
-    const d=e.target.closest('[data-delset]');if(d){d.closest('.setrow').remove();}});
-  // beat-last-session highlight: volt row when weight (or reps at same weight) beats last time's same set
+  const collect=()=>{ // DOM → session (single source of truth for save, draft, and redraws)
+    session.date=$('#woDate').value;session.notes=$('#woNotes').value.trim();
+    session.exercises.forEach((ex,ei)=>{const rows=$$(`[data-ex="${ei}"] .sets .setrow`,root);
+      ex.sets=rows.map(r=>{const ins=r.querySelectorAll('input');const done=r.querySelector('[data-tickset]').classList.contains('on');
+        return ex.mode==='time'?{secs:ins[0].value,done}:{weight:ins[0].value,reps:ins[1].value,done};});});
+  };
+  let draftT=null;
+  const saveDraft=async()=>{if(!drafting)return;collect();await idbPut('kv',{k:'woDraft',v:session});};
+  const saveDraftSoon=()=>{if(!drafting)return;clearTimeout(draftT);draftT=setTimeout(saveDraft,400);};
+  root.addEventListener('click',e=>{
+    const a=e.target.closest('[data-addset]');
+    if(a){const ei=+a.dataset.addset;const ex=session.exercises[ei];const setsDiv=root.querySelector(`[data-ex="${ei}"] .sets`);
+      const si=setsDiv.children.length;
+      setsDiv.insertAdjacentHTML('beforeend',setRow(ei,si,ex.mode==='time'?{secs:''}:{weight:'',reps:''},ex,phFor(ex,si)));
+      saveDraftSoon();return;}
+    const tk=e.target.closest('[data-tickset]');
+    if(tk){const on=tk.classList.toggle('on');
+      if(on){ // tick = "done as planned": materialize the greyed-in suggestion, then rest
+        tk.closest('.setrow').querySelectorAll('input').forEach(inp=>{if(!inp.value&&+inp.placeholder)inp.value=inp.placeholder;});
+        const ex=session.exercises[+tk.closest('[data-ex]').dataset.ex];
+        buzz();startRest(ex.rest||(ex.mode==='time'?30:90));}
+      saveDraftSoon();return;}
+    const d=e.target.closest('[data-delset]');if(d){d.closest('.setrow').remove();saveDraftSoon();}});
+  // beat-last-session highlight: volt row when this set beats last time's same set
   root.addEventListener('input',e=>{
     if(!e.target.matches('.setrow input'))return;
+    saveDraftSoon();
     const exEl=e.target.closest('[data-ex]');if(!exEl)return;
     const row=e.target.closest('.setrow');const sets=row.parentElement;if(!sets.classList.contains('sets'))return;
     const si=[...sets.children].indexOf(row);
-    const prev=(lastMap&&lastMap[session.exercises[+exEl.dataset.ex].name]||[])[si];
-    const ins=row.querySelectorAll('input');const w=+ins[0].value||0,r=+ins[1].value||0;
+    const ex=session.exercises[+exEl.dataset.ex];
+    const prev=(lastMap&&lastMap[ex.name]||[])[si];
+    const ins=row.querySelectorAll('input');
+    if(ex.mode==='time'){const sv=+ins[0].value||0;row.classList.toggle('beat',!!(prev&&sv&&sv>+(prev.secs||0)));return;}
+    const w=+ins[0].value||0,r=+ins[1].value||0;
     row.classList.toggle('beat',!!(prev&&w&&r&&(w>+prev.weight||(w===+prev.weight&&r>+prev.reps))));
   });
+  $('#woDate').addEventListener('change',saveDraftSoon);
+  $('#woNotes').addEventListener('input',saveDraftSoon);
+  $('#woAddEx').onclick=()=>{
+    const name=$('#woNewEx').value.trim();if(!name)return;
+    collect();
+    const pe=progEx(name); // known exercise (e.g. from another day) brings its target/mode/rest along
+    session.exercises.push({name,target:pe?.target||'',mode:pe?.mode||'reps',rest:pe?.rest,
+      sets:[pe?.mode==='time'?{secs:''}:{weight:'',reps:''}]});
+    root.innerHTML=bodyHtml();
+    saveDraftSoon();toast(`${name} added to this session`);};
   $('#woSave').onclick=async()=>{
-    session.date=$('#woDate').value;session.notes=$('#woNotes').value.trim();
-    session.exercises.forEach((ex,ei)=>{const rows=$$(`[data-ex="${ei}"] .setrow`,root).filter(r=>r.querySelector('input'));
-      ex.sets=rows.map(r=>{const ins=r.querySelectorAll('input');return{weight:ins[0].value,reps:ins[1].value};});});
-    await idbPut('workouts',session);closeModal();buzz();toast('Session saved 💪');curDate=session.date;go('train');renderToday();};
+    collect();
+    await idbPut('workouts',session);
+    if(drafting)await idbDel('kv','woDraft');
+    closeModal();buzz();toast('Session saved 💪');curDate=session.date;go('train');renderToday();};
+  if(drafting)saveDraft(); // a just-started session survives from second one
 }
-function setRow(ei,si,s){return `<div class="setrow"><button type="button" class="si" data-tickset aria-label="Mark set ${si+1} done (starts rest timer)">${si+1}</button><input type="number" inputmode="decimal" placeholder="0" aria-label="Set ${si+1} weight, kg" value="${s.weight??''}"><input type="number" inputmode="numeric" placeholder="0" aria-label="Set ${si+1} reps" value="${s.reps??''}"><button class="del" data-delset aria-label="Remove set ${si+1}">✕</button></div>`;}
+function setRow(ei,si,s,ex,ph){
+  const tick=`<button type="button" class="si${s.done?' on':''}" data-tickset aria-label="Mark set ${si+1} done (starts rest timer)">${si+1}</button>`;
+  if(ex&&ex.mode==='time')return `<div class="setrow time">${tick}<input type="number" inputmode="numeric" placeholder="${ph&&ph.secs?ph.secs:'0'}" aria-label="Interval ${si+1}, seconds" value="${s.secs??''}"><button class="del" data-delset aria-label="Remove interval ${si+1}">✕</button></div>`;
+  return `<div class="setrow">${tick}<input type="number" inputmode="decimal" placeholder="0" aria-label="Set ${si+1} weight, kg" value="${s.weight??''}"><input type="number" inputmode="numeric" placeholder="${ph&&ph.reps?ph.reps:'0'}" aria-label="Set ${si+1} reps" value="${s.reps??''}"><button class="del" data-delset aria-label="Remove set ${si+1}">✕</button></div>`;
+}
 
 let restInt=null;
 function startRest(sec){
   clearInterval(restInt);const el=$('#restTimer');if(!el)return;
-  let t=sec;
-  const paint=()=>{el.textContent=`⏱ Rest ${Math.floor(t/60)}:${String(t%60).padStart(2,'0')} — tap to skip`;};
+  const end=Date.now()+sec*1000; // timestamp-based: survives the phone freezing timers while locked
+  const paint=()=>{
+    const t=Math.max(0,Math.round((end-Date.now())/1000));
+    if(t<=0){clearInterval(restInt);el.classList.add('hidden');buzz();toast('Rest done — next set 💪');return;}
+    el.textContent=`⏱ Rest ${Math.floor(t/60)}:${String(t%60).padStart(2,'0')} — tap to skip`;
+  };
   el.classList.remove('hidden');paint();
-  restInt=setInterval(()=>{t--;if(t<=0){clearInterval(restInt);el.classList.add('hidden');buzz();toast('Rest done — next set 💪');}else paint();},1000);
+  restInt=setInterval(paint,500);
   el.onclick=()=>{clearInterval(restInt);el.classList.add('hidden');};
 }
 async function openWorkout(id){const w=await idbGet('workouts',id);const all=(await idbGetAll('workouts')).filter(x=>x.dayKey===w.dayKey&&x.date<w.date).sort((a,b)=>a.date<b.date?1:-1);const lastMap={};if(all[0])all[0].exercises.forEach(e=>lastMap[e.name]=e.sets);drawSession(w,lastMap);}
