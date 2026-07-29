@@ -614,7 +614,11 @@ darkMQ.addEventListener('change',()=>{if((SET.theme||'auto')==='auto')applyTheme
 /* ---------- Cloud sync engine (Supabase; single generic `records` table) ---------- */
 let syncTimer=null,syncBusy=false;
 function syncConfigured(){const s=SET.sync;return !!(s&&s.url&&s.anonKey&&s.email&&s.pass);}
-function syncSoon(){if(!syncConfigured()||!navigator.onLine)return;clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncNow().catch(()=>{}),4000);}
+function syncSoon(){if(!syncConfigured()||!navigator.onLine)return;clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncNow().catch(()=>{}),2000);}
+function syncFlush(){ // push immediately — used when the app is being hidden/closed (phones freeze timers)
+  if(!syncConfigured()||!navigator.onLine)return;
+  clearTimeout(syncTimer);syncNow().catch(()=>{});
+}
 function sb(path,opts={},withAuth=true){
   const s=SET.sync;
   return fetch(s.url.replace(/\/+$/,'')+path,{...opts,headers:{
@@ -662,8 +666,10 @@ async function syncNow(){
       if(!res.ok)throw new Error('push failed ('+res.status+')');
       s.lastPush=maxUp;await idbPut('kv',{k:'tombstones',v:[]});
     }
-    // PULL: rows newer than our last pull; apply if newer than local (last write wins)
-    const res2=await sb('/rest/v1/records?select=*&up=gt.'+(s.lastPull||0)+'&order=up.asc',{});
+    // PULL: fetch ALL rows and apply idempotently (last write wins). A "since lastPull"
+    // filter on device-stamped times silently skips records that offline devices push
+    // late — the normal case, not the edge case. Full pull is cheap at single-user scale.
+    const res2=await sb('/rest/v1/records?select=*&order=up.asc',{});
     if(!res2.ok)throw new Error('pull failed ('+res2.status+')');
     const pulled=await res2.json();let applied=0,kvApplied=false;
     for(const row of pulled){
@@ -678,12 +684,23 @@ async function syncNow(){
       if(!local||(local.up||0)<row.up){await idbPut(row.store,row.data,true);applied++;if(isKv)kvApplied=true;}
     }
     if(kvApplied)await loadProgram();
-    if(pulled.length)s.lastPull=Math.max(s.lastPull||0,...pulled.map(r=>r.up));
     s.lastSync=Date.now();await saveSettings();
     return applied;
   }finally{syncBusy=false;}
 }
 window.addEventListener('online',()=>syncSoon());
+// leaving the app (phone lock / app switch): flush any pending push right now.
+// returning to the app (tab focus): pull what other devices did meanwhile.
+function syncRefresh(){ // pull + re-render if anything changed
+  if(!syncConfigured()||!navigator.onLine)return;
+  syncNow().then(n=>{if(n)go(curView);}).catch(()=>{});
+}
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden)syncFlush();else syncRefresh();
+});
+window.addEventListener('pagehide',syncFlush);
+// long-lived desktop tabs: re-sync every 5 minutes so other devices' changes appear
+setInterval(()=>{if(!document.hidden)syncRefresh();},5*60*1000);
 
 /* ---------- State ---------- */
 let curDate=todayStr();

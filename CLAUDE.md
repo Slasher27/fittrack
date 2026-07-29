@@ -149,6 +149,14 @@ newer than the local record, and the push payload is deduped by `(store,id)`
 keeping the newest row — both essential for the seed-reseed flow (delete +
 re-put of the same ids), learned the hard way on 2026-07-29 when stale
 tombstones deleted seed meals across devices.
+**Pull is always a FULL pull** of the `records` table (idempotent LWW apply) —
+never reintroduce a "rows since lastPull" filter: `up` is *device*-stamped, so
+an offline phone uploading a record late (stamped 08:00, pushed 12:00) would be
+skipped forever by any high-water mark. Trivial data volume makes full pull the
+right trade. Sync triggers: launch, 2 s after a local write (`syncSoon`),
+`syncFlush` on tab hide/pagehide (phones freeze timers, so push before the OS
+suspends us), on tab re-focus, every 5 min while visible, on `online`, and the
+Settings "Sync now" button.
 Photos and `kv` are device-local. Sync credentials live in `SET.sync` and are
 stripped from backups. The service worker must never intercept cross-origin
 requests (see the origin check in `service-worker.js`).
