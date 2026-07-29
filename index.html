@@ -919,11 +919,12 @@ function progressionAdvice(name,target,sets){ // double progression: all sets at
   }
 }
 function progEx(name){for(const d of Object.values(PROG.days))for(const e of d.ex)if(e.name===name)return e;return null;}
-function timedAdvice(ex,last){ // interval progression: hit every interval at target → extend
+function timedAdvice(ex,last){ // interval progression: hit every interval → more work or less rest
   const done=(last||[]).filter(s=>+s.secs>0);if(!done.length)return null;
-  const tgt=+((String(ex.target).match(/(\d+)\s*s/)||[])[1])||0;
-  if(tgt&&done.every(s=>+s.secs>=tgt))return `all intervals hit ${tgt} s — add an interval, go to ${tgt+5} s, or trim the rest`;
-  return null;
+  const tgt=Math.max(+((String(ex.target).match(/(\d+)\s*s/)||[])[1])||0,...done.map(s=>+s.secs));
+  if(!done.every(s=>+s.secs>=tgt))return null;
+  const r=Math.max(0,...done.map(s=>+s.rest||0))||ex.rest||0;
+  return `all intervals hit ${tgt} s — add an interval, go to ${tgt+5} s work${r>=10?`, or cut rest to ${r-5} s`:''}`;
 }
 
 async function computeStats(){
@@ -1586,15 +1587,22 @@ function drawSession(session,lastMap,drafting){
   // sessions saved before modes existed: pull mode/rest from today's program
   session.exercises.forEach(ex=>{const pe=progEx(ex.name);if(!ex.mode)ex.mode=pe?.mode||'reps';if(ex.rest==null&&pe)ex.rest=pe.rest;});
   const phFor=(ex,si)=>{const prev=(lastMap&&lastMap[ex.name]||[])[si]||{};
-    return ex.mode==='time'?{secs:prev.secs||+((String(ex.target).match(/(\d+)\s*s/)||[])[1])||''}:{reps:prev.reps||''};};
+    return ex.mode==='time'
+      ?{secs:prev.secs||+((String(ex.target).match(/(\d+)\s*s/)||[])[1])||'',rest:prev.rest||ex.rest||''}
+      :{reps:prev.reps||''};};
   const bodyHtml=()=>session.exercises.map((ex,ei)=>{
     const timed=ex.mode==='time';
     const last=lastMap&&lastMap[ex.name];
-    const lastTxt=last&&last.some(s=>s.weight||s.reps||s.secs)?`Last: ${last.map(s=>timed?`${s.secs||'–'}s`:`${s.weight||'–'}×${s.reps||'–'}`).join(', ')}`:'';
+    let lastTxt='';
+    if(last&&last.some(s=>s.weight||s.reps||s.secs)){
+      if(timed){const w=[...new Set(last.map(s=>s.secs||'–'))],r=[...new Set(last.map(s=>s.rest||''))].filter(Boolean);
+        lastTxt=w.length===1&&r.length<=1?`Last: ${last.length} × ${w[0]}s work${r.length?` / ${r[0]}s rest`:''}`:`Last: ${last.map(s=>`${s.secs||'–'}s${s.rest?`/${s.rest}r`:''}`).join(', ')}`;}
+      else lastTxt=`Last: ${last.map(s=>`${s.weight||'–'}×${s.reps||'–'}`).join(', ')}`;
+    }
     const adv=last?(timed?timedAdvice(ex,last):progressionAdvice(ex.name,ex.target,last)):null;
     return `<div data-ex="${ei}"><div class="exhead"><span class="en">${esc(ex.name)}</span><span class="et">${ex.target?`target ${esc(ex.target)}`:''}${ex.rest?` · rest ${ex.rest}s`:''}</span></div>
       ${lastTxt?`<div class="lasthint">${esc(lastTxt)}${adv?` — <b>↑ ${esc(adv)}</b>`:''}</div>`:''}
-      <div class="setrow${timed?' time':''}" style="color:var(--muted);font-size:11px;font-weight:700"><span class="si">#</span>${timed?'<span>SECONDS</span>':'<span>KG</span><span>REPS</span>'}<span></span></div>
+      <div class="setrow${timed?' time':''}" style="color:var(--muted);font-size:11px;font-weight:700"><span class="si">#</span>${timed?'<span>WORK S</span><span>REST S</span>':'<span>KG</span><span>REPS</span>'}<span></span></div>
       <div class="sets">${ex.sets.map((s,si)=>setRow(ei,si,s,ex,phFor(ex,si))).join('')}</div>
       <button class="addset" data-addset="${ei}">+ ${timed?'interval':'set'}</button></div>`;
   }).join('');
@@ -1611,7 +1619,7 @@ function drawSession(session,lastMap,drafting){
     session.date=$('#woDate').value;session.notes=$('#woNotes').value.trim();
     session.exercises.forEach((ex,ei)=>{const rows=$$(`[data-ex="${ei}"] .sets .setrow`,root);
       ex.sets=rows.map(r=>{const ins=r.querySelectorAll('input');const done=r.querySelector('[data-tickset]').classList.contains('on');
-        return ex.mode==='time'?{secs:ins[0].value,done}:{weight:ins[0].value,reps:ins[1].value,done};});});
+        return ex.mode==='time'?{secs:ins[0].value,rest:ins[1].value,done}:{weight:ins[0].value,reps:ins[1].value,done};});});
   };
   let draftT=null;
   const saveDraft=async()=>{if(!drafting)return;collect();await idbPut('kv',{k:'woDraft',v:session});};
@@ -1620,14 +1628,17 @@ function drawSession(session,lastMap,drafting){
     const a=e.target.closest('[data-addset]');
     if(a){const ei=+a.dataset.addset;const ex=session.exercises[ei];const setsDiv=root.querySelector(`[data-ex="${ei}"] .sets`);
       const si=setsDiv.children.length;
-      setsDiv.insertAdjacentHTML('beforeend',setRow(ei,si,ex.mode==='time'?{secs:''}:{weight:'',reps:''},ex,phFor(ex,si)));
+      setsDiv.insertAdjacentHTML('beforeend',setRow(ei,si,ex.mode==='time'?{secs:'',rest:''}:{weight:'',reps:''},ex,phFor(ex,si)));
       saveDraftSoon();return;}
     const tk=e.target.closest('[data-tickset]');
     if(tk){const on=tk.classList.toggle('on');
       if(on){ // tick = "done as planned": materialize the greyed-in suggestion, then rest
-        tk.closest('.setrow').querySelectorAll('input').forEach(inp=>{if(!inp.value&&+inp.placeholder)inp.value=inp.placeholder;});
+        const row=tk.closest('.setrow');
+        row.querySelectorAll('input').forEach(inp=>{if(!inp.value&&+inp.placeholder)inp.value=inp.placeholder;});
         const ex=session.exercises[+tk.closest('[data-ex]').dataset.ex];
-        buzz();startRest(ex.rest||(ex.mode==='time'?30:90));}
+        // timed exercises rest for THIS interval's rest value (so cutting 20 → 15 s takes effect immediately)
+        const rsec=ex.mode==='time'?(+row.querySelectorAll('input')[1].value||ex.rest||30):(ex.rest||90);
+        buzz();startRest(rsec);}
       saveDraftSoon();return;}
     const d=e.target.closest('[data-delset]');if(d){d.closest('.setrow').remove();saveDraftSoon();}});
   // beat-last-session highlight: volt row when this set beats last time's same set
@@ -1640,7 +1651,9 @@ function drawSession(session,lastMap,drafting){
     const ex=session.exercises[+exEl.dataset.ex];
     const prev=(lastMap&&lastMap[ex.name]||[])[si];
     const ins=row.querySelectorAll('input');
-    if(ex.mode==='time'){const sv=+ins[0].value||0;row.classList.toggle('beat',!!(prev&&sv&&sv>+(prev.secs||0)));return;}
+    if(ex.mode==='time'){const sv=+ins[0].value||0,rv=+ins[1].value||0;
+      // beat = more work, or same work on less rest
+      row.classList.toggle('beat',!!(prev&&sv&&(sv>+(prev.secs||0)||(sv===+(prev.secs||0)&&rv&&+(prev.rest||0)&&rv<+prev.rest))));return;}
     const w=+ins[0].value||0,r=+ins[1].value||0;
     row.classList.toggle('beat',!!(prev&&w&&r&&(w>+prev.weight||(w===+prev.weight&&r>+prev.reps))));
   });
@@ -1651,7 +1664,7 @@ function drawSession(session,lastMap,drafting){
     collect();
     const pe=progEx(name); // known exercise (e.g. from another day) brings its target/mode/rest along
     session.exercises.push({name,target:pe?.target||'',mode:pe?.mode||'reps',rest:pe?.rest,
-      sets:[pe?.mode==='time'?{secs:''}:{weight:'',reps:''}]});
+      sets:[pe?.mode==='time'?{secs:'',rest:''}:{weight:'',reps:''}]});
     root.innerHTML=bodyHtml();
     saveDraftSoon();toast(`${name} added to this session`);};
   $('#woSave').onclick=async()=>{
@@ -1663,7 +1676,7 @@ function drawSession(session,lastMap,drafting){
 }
 function setRow(ei,si,s,ex,ph){
   const tick=`<button type="button" class="si${s.done?' on':''}" data-tickset aria-label="Mark set ${si+1} done (starts rest timer)">${si+1}</button>`;
-  if(ex&&ex.mode==='time')return `<div class="setrow time">${tick}<input type="number" inputmode="numeric" placeholder="${ph&&ph.secs?ph.secs:'0'}" aria-label="Interval ${si+1}, seconds" value="${s.secs??''}"><button class="del" data-delset aria-label="Remove interval ${si+1}">✕</button></div>`;
+  if(ex&&ex.mode==='time')return `<div class="setrow time">${tick}<input type="number" inputmode="numeric" placeholder="${ph&&ph.secs?ph.secs:'0'}" aria-label="Interval ${si+1}, work seconds" value="${s.secs??''}"><input type="number" inputmode="numeric" placeholder="${ph&&ph.rest?ph.rest:'0'}" aria-label="Interval ${si+1}, rest seconds" value="${s.rest??''}"><button class="del" data-delset aria-label="Remove interval ${si+1}">✕</button></div>`;
   return `<div class="setrow">${tick}<input type="number" inputmode="decimal" placeholder="0" aria-label="Set ${si+1} weight, kg" value="${s.weight??''}"><input type="number" inputmode="numeric" placeholder="${ph&&ph.reps?ph.reps:'0'}" aria-label="Set ${si+1} reps" value="${s.reps??''}"><button class="del" data-delset aria-label="Remove set ${si+1}">✕</button></div>`;
 }
 

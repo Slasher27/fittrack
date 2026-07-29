@@ -132,7 +132,7 @@ v2 added the `water` store; migrations run in `onupgradeneeded`, whose
 | `log` | `id` | `date` | `{id, date:'YYYY-MM-DD', meal:'breakfast'|'lunch'|'snack'|'dinner', foodId, name, serving, servings, kcal, protein, carbs, fat, ts}` |
 | `measurements` | `id` | `date` | `{id, date, weight, waist, chest, arm, thigh, notes}` |
 | `photos` | `id` | `date` | `{id, date, category:'Front'|'Side'|'Back', note, blob:Blob, ts}` |
-| `workouts` | `id` | `date` | `{id, date, dayKey:'A'|'B'|'C', title, notes, ts, exercises:[{name, target, mode:'reps'|'time', rest?, sets:[{weight, reps, done?} \| {secs, done?}]}]}` — `mode:'time'` = interval work logged in seconds (e.g. skipping) |
+| `workouts` | `id` | `date` | `{id, date, dayKey:'A'|'B'|'C', title, notes, ts, exercises:[{name, target, mode:'reps'|'time', rest?, sets:[{weight, reps, done?} \| {secs, rest, done?}]}]}` — `mode:'time'` = interval work logged as work/rest seconds per interval (e.g. skipping); the row's `rest` drives the rest timer |
 | `water` | `id` | `date` | `{id, date, ml, ts}` — one row per +250/+500 tap; daily total is the sum (target `WATER_TARGET_ML` = 3000) |
 
 `kv` singletons:
