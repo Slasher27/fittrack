@@ -208,6 +208,29 @@ Offline: the app works fully; only these AI actions are unavailable.
 
 ---
 
+## 9a. Recovery — a fresh device must offer to restore
+
+Learned the hard way on 2026-08-03: clearing site data wiped the desktop, and
+the app silently re-seeded a blank plan as if nothing had ever existed. The
+data was safe in Supabase the whole time — but the **credentials to reach it
+live in `kv.settings`, inside the database that just got wiped**, so the device
+had no idea a cloud copy existed. Recovery required the phone's QR link.
+
+v2 requirements:
+
+- **Empty database on launch → ask, don't seed.** "Restore from your account"
+  (sign in) / "Start fresh". Never silently present a blank app to someone who
+  has data in the cloud.
+- **Keep the restore path independent of the wiped store** — signing in with
+  email + password must be enough; the QR link stays a convenience, not the
+  only way back.
+- **Sync photos**, or state plainly at the point of capture that they are the
+  one thing sync will not save.
+- **Sync targets/goals** (not the API key or sync password).
+- Note: in-app "Erase all data" clears stores directly and writes no
+  tombstones, so it stays device-local and never cascades a delete to other
+  devices. Preserve that property.
+
 ## 10. Build order
 
 | # | Step | Fixes |

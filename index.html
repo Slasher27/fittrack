@@ -200,11 +200,12 @@ function niceDate(s){const d=parseD(s),t=todayStr();if(s===t)return 'Today';cons
 
 /* ---------- IndexedDB ---------- */
 let DB;
-function openDB(){return new Promise((res,rej)=>{const r=indexedDB.open('fittrack',2); // v2: + water store
+function openDB(){return new Promise((res,rej)=>{const r=indexedDB.open('fittrack',3); // v2: + water · v3: + exercises
   r.onupgradeneeded=e=>{const db=e.target.result;
     if(!db.objectStoreNames.contains('kv'))db.createObjectStore('kv',{keyPath:'k'});
     if(!db.objectStoreNames.contains('foods'))db.createObjectStore('foods',{keyPath:'id'});
     if(!db.objectStoreNames.contains('meals'))db.createObjectStore('meals',{keyPath:'id'});
+    if(!db.objectStoreNames.contains('exercises'))db.createObjectStore('exercises',{keyPath:'id'});
     for(const s of ['log','measurements','photos','workouts','water']){
       if(!db.objectStoreNames.contains(s)){const os=db.createObjectStore(s,{keyPath:'id'});os.createIndex('date','date');}
     }
@@ -215,7 +216,7 @@ function idbGetAll(store){return new Promise((res,rej)=>{const r=tx(store).getAl
 function idbGet(store,k){return new Promise((res,rej)=>{const r=tx(store).get(k);r.onsuccess=()=>res(r.result);r.onerror=rej;});}
 /* Cloud sync (Supabase): stores below sync; writes stamp `up` (ms), deletes leave tombstones.
    `fromSync=true` bypasses stamping so pulled records don't re-trigger a push loop. */
-const SYNC_STORES=new Set(['foods','meals','log','measurements','workouts','water']);
+const SYNC_STORES=new Set(['foods','meals','log','measurements','workouts','water','exercises']);
 const SYNCED_KV=new Set(['program','equipment']); // kv keys that sync (never settings/secrets)
 function idbPut(store,v,fromSync){
   if(!fromSync&&(SYNC_STORES.has(store)||(store==='kv'&&SYNCED_KV.has(v.k)))){v.up=Date.now();syncSoon();}
@@ -326,6 +327,134 @@ const SLOT_KEY={Breakfast:'breakfast',Lunch:'lunch',Snack:'snack',Dinner:'dinner
 /* The training program is DATA (kv key 'program'), seeded once from this default and
    editable in-app (Train → ✎). `type` drives the Coach's progression advice. */
 const EX_TYPES=['barbell-lower','barbell-upper','dumbbell','kettlebell','bodyweight','band','other'];
+
+/* ---------- Exercise catalog (v2 foundation — see V2-SPEC.md §2) ----------
+   Exercises are entities, not name strings. Each one knows its movement
+   pattern, the muscles it trains, the kit it needs, whether its reps are
+   PER SIDE, and how long to rest. That single change is what lets the app
+   answer "10 per leg or 5?", roll volume up by muscle group, and give
+   equipment-correct progression advice — instead of guessing from the name.
+   Terse arrays → objects, same style as SEED_FOODS.
+   [id, name, pattern, primary, secondary, equipment, opts?]
+   opts: {u:1 unilateral · t:1 timed · rest:n override · load:'bw'|'bw+'|'band'|'none' · alias:'a,b'} */
+const MUSCLE_REGION={chest:'upper-push',triceps:'upper-push','front-delts':'upper-push','side-delts':'upper-push',
+  lats:'upper-pull','upper-back':'upper-pull','rear-delts':'upper-pull',biceps:'upper-pull',forearms:'upper-pull',
+  quads:'lower',hamstrings:'lower',glutes:'lower',calves:'lower',core:'core','full-body':'conditioning'};
+const PATTERN_REST={squat:150,hinge:150,'horizontal-push':120,'vertical-push':120,'horizontal-pull':90,
+  'vertical-pull':90,lunge:75,carry:75,core:60,isolation:60,conditioning:60};
+const EX_SEED=[
+ // ---- squat ----
+ ['back-squat','Back Squat','squat','quads,glutes','hamstrings,core','barbell,rack',{alias:'squat,barbell squat'}],
+ ['front-squat','Front Squat','squat','quads','glutes,core','barbell,rack',{rest:120}],
+ ['goblet-squat','Goblet Squat','squat','quads,glutes','core','kettlebell',{rest:90}],
+ ['box-squat','Box Squat','squat','quads,glutes','hamstrings','barbell,rack'],
+ ['split-squat','Bulgarian Split Squat','lunge','quads,glutes','hamstrings','dumbbell',{u:1,alias:'bulgarian split squat'}],
+ ['pistol-squat','Pistol Squat','lunge','quads,glutes','core','none',{u:1,load:'bw+'}],
+ ['air-squat','Bodyweight Squat','squat','quads,glutes','core','none',{load:'bw',rest:45}],
+ ['leg-press','Leg Press','squat','quads,glutes','hamstrings','machine',{rest:90}],
+ ['hack-squat','Hack Squat','squat','quads','glutes','machine',{rest:90}],
+ // ---- hinge ----
+ ['deadlift','Deadlift','hinge','hamstrings,glutes','upper-back,core','barbell',{alias:'conventional deadlift'}],
+ ['rdl','Romanian Deadlift','hinge','hamstrings,glutes','upper-back','barbell',{rest:90,alias:'rdl'}],
+ ['sldl','Stiff-leg Deadlift','hinge','hamstrings','glutes','barbell',{rest:90}],
+ ['sumo-dl','Sumo Deadlift','hinge','glutes,hamstrings','quads,upper-back','barbell'],
+ ['trap-bar-dl','Trap-bar Deadlift','hinge','quads,glutes','hamstrings','barbell'],
+ ['sl-rdl','Single-leg RDL','hinge','hamstrings,glutes','core','kettlebell',{u:1,rest:75,alias:'kb single-leg rdl,single leg rdl'}],
+ ['hip-thrust','Hip Thrust','hinge','glutes','hamstrings','barbell',{rest:90}],
+ ['good-morning','Good Morning','hinge','hamstrings','glutes,core','barbell',{rest:90}],
+ ['back-ext','Back Extension','hinge','glutes,hamstrings','core','none',{load:'bw+',rest:60}],
+ ['kb-swing','KB Swing','conditioning','glutes,hamstrings','core,full-body','kettlebell',{rest:60,alias:'kb swings,kettlebell swing,swings'}],
+ // ---- lunge / single leg ----
+ ['reverse-lunge','Reverse Lunge','lunge','quads,glutes','hamstrings','kettlebell',{u:1,alias:'kb goblet reverse lunge,goblet reverse lunge'}],
+ ['fwd-lunge','Forward Lunge','lunge','quads,glutes','hamstrings','dumbbell',{u:1}],
+ ['walking-lunge','Walking Lunge','lunge','quads,glutes','hamstrings','dumbbell',{u:1}],
+ ['step-up','Step-up','lunge','quads,glutes','calves','dumbbell,box',{u:1}],
+ ['cossack','Cossack Squat','lunge','quads,glutes','hamstrings','none',{u:1,load:'bw+',rest:60}],
+ // ---- horizontal push ----
+ ['bench','Bench Press','horizontal-push','chest','triceps,front-delts','barbell,bench',{alias:'bench press,flat bench'}],
+ ['incline-bench','Incline Bench Press','horizontal-push','chest,front-delts','triceps','barbell,bench'],
+ ['db-bench','DB Bench Press','horizontal-push','chest','triceps,front-delts','dumbbell,bench'],
+ ['db-incline','Incline DB Press','horizontal-push','chest,front-delts','triceps','dumbbell,bench'],
+ ['pushup','Push-up','horizontal-push','chest','triceps,core','none',{load:'bw+',rest:60,alias:'push-ups,pushups'}],
+ ['dip','Weighted Dips','horizontal-push','chest,triceps','front-delts','dip-station',{load:'bw+',rest:90,alias:'dips,dip'}],
+ ['db-fly','DB Fly','isolation','chest','front-delts','dumbbell,bench'],
+ ['cable-fly','Cable Fly','isolation','chest','front-delts','pulley'],
+ ['floor-press','Floor Press','horizontal-push','chest','triceps','dumbbell'],
+ // ---- vertical push ----
+ ['ohp','Overhead Press','vertical-push','front-delts','triceps,core','barbell',{alias:'overhead press,military press,strict press'}],
+ ['db-ohp','DB Shoulder Press','vertical-push','front-delts','triceps','dumbbell'],
+ ['push-press','Push Press','vertical-push','front-delts','triceps,quads','barbell'],
+ ['kb-press','KB Overhead Press','vertical-push','front-delts','triceps,core','kettlebell',{u:1,rest:90}],
+ ['pike-pushup','Pike Push-up','vertical-push','front-delts','triceps','none',{load:'bw',rest:60}],
+ ['handstand-pushup','Handstand Push-up','vertical-push','front-delts','triceps','none',{load:'bw'}],
+ // ---- vertical pull ----
+ ['pullup','Pull-ups','vertical-pull','lats','biceps,upper-back','pull-up-bar',{load:'bw+',rest:90,alias:'pull-up,pullups,weighted pull-ups'}],
+ ['chinup','Chin-ups','vertical-pull','lats,biceps','upper-back','pull-up-bar',{load:'bw+',rest:90,alias:'chin-up,chinups'}],
+ ['lat-pulldown','Lat Pulldown','vertical-pull','lats','biceps,upper-back','pulley',{rest:75,alias:'pulldown'}],
+ ['straight-arm-pd','Straight-arm Pulldown','isolation','lats','core','pulley',{rest:60}],
+ ['band-pullup','Band-assisted Pull-up','vertical-pull','lats','biceps','pull-up-bar,band',{load:'band',rest:90}],
+ // ---- horizontal pull ----
+ ['bb-row','Barbell Row','horizontal-pull','upper-back,lats','biceps,rear-delts','barbell',{rest:90,alias:'barbell bent-over row,bent-over row,bent over row'}],
+ ['pendlay-row','Pendlay Row','horizontal-pull','upper-back','lats,biceps','barbell',{rest:90}],
+ ['db-row','DB Row','horizontal-pull','lats,upper-back','biceps','dumbbell',{u:1,rest:75,alias:'one-arm row,single-arm row'}],
+ ['seated-row','Seated Cable Row','horizontal-pull','upper-back','lats,biceps','pulley',{rest:75}],
+ ['inverted-row','Inverted Row','horizontal-pull','upper-back','lats,biceps','barbell,rack',{load:'bw+',rest:60}],
+ ['kb-row','KB Row','horizontal-pull','lats,upper-back','biceps','kettlebell',{u:1,rest:75}],
+ ['face-pull','Band Face Pull','isolation','rear-delts','upper-back','band',{load:'band',rest:60,alias:'face pull,face pulls'}],
+ // ---- shoulders / arms ----
+ ['lat-raise','Lateral Raise','isolation','side-delts','front-delts','dumbbell',{alias:'lateral raises,side raise'}],
+ ['rear-fly','Rear Delt Fly','isolation','rear-delts','upper-back','dumbbell'],
+ ['front-raise','Front Raise','isolation','front-delts','chest','dumbbell'],
+ ['shrug','Shrug','isolation','upper-back','forearms','barbell'],
+ ['db-curl','DB Curl','isolation','biceps','forearms','dumbbell',{alias:'dumbbell curl,bicep curl,biceps curl'}],
+ ['bb-curl','Barbell Curl','isolation','biceps','forearms','barbell'],
+ ['hammer-curl','Hammer Curl','isolation','biceps,forearms','','dumbbell'],
+ ['preacher-curl','Preacher Curl','isolation','biceps','','dumbbell,bench'],
+ ['pushdown','Triceps Pushdown','isolation','triceps','','pulley',{alias:'tricep pushdown,high-pulley triceps pushdown'}],
+ ['skullcrusher','Skullcrusher','isolation','triceps','','barbell,bench'],
+ ['oh-ext','Overhead Triceps Extension','isolation','triceps','','dumbbell'],
+ ['close-grip-bench','Close-grip Bench','horizontal-push','triceps','chest','barbell,bench',{rest:90}],
+ // ---- core ----
+ ['hanging-leg-raise','Hanging Leg Raise','core','core','forearms','pull-up-bar',{load:'bw+',alias:'leg raises,hanging leg raises'}],
+ ['plank','Plank','core','core','','none',{t:1,load:'bw',rest:45}],
+ ['side-plank','Side Plank','core','core','','none',{t:1,u:1,load:'bw',rest:45}],
+ ['pallof','Band Pallof Press','core','core','','band',{load:'band',rest:45,alias:'pallof press'}],
+ ['ab-wheel','Ab Wheel Rollout','core','core','lats','ab-wheel',{load:'bw'}],
+ ['hollow-hold','Hollow Hold','core','core','','none',{t:1,load:'bw',rest:45}],
+ ['russian-twist','Russian Twist','core','core','','kettlebell'],
+ ['dead-bug','Dead Bug','core','core','','none',{load:'bw',rest:45}],
+ ['sit-up','Sit-up','core','core','','none',{load:'bw+',rest:45}],
+ ['crunch','Crunch','core','core','','none',{load:'bw',rest:45}],
+ // ---- carry / conditioning ----
+ ['farmers-carry','Farmer’s Carry','carry','forearms,core','upper-back','dumbbell',{t:1}],
+ ['suitcase-carry','Suitcase Carry','carry','core,forearms','','kettlebell',{u:1,t:1}],
+ ['skipping','Skipping intervals','conditioning','full-body','calves','rope',{t:1,rest:20,alias:'skipping,jump rope,skip'}],
+ ['rowing','Rowing Machine','conditioning','full-body','lats','rower',{t:1}],
+ ['assault-bike','Air Bike','conditioning','full-body','quads','bike',{t:1}],
+ ['burpee','Burpee','conditioning','full-body','chest,quads','none',{load:'bw'}],
+ ['mountain-climber','Mountain Climber','conditioning','core','full-body','none',{t:1,load:'bw',rest:45}],
+ ['kb-clean','KB Clean','conditioning','full-body','glutes,upper-back','kettlebell',{u:1,rest:90}],
+ ['kb-snatch','KB Snatch','conditioning','full-body','glutes,front-delts','kettlebell',{u:1,rest:90}],
+ ['turkish-getup','Turkish Get-up','conditioning','full-body','core','kettlebell',{u:1,rest:90}],
+ ['thruster','Thruster','conditioning','full-body','quads,front-delts','barbell',{rest:90}],
+ ['clean-and-press','Clean & Press','conditioning','full-body','front-delts,quads','barbell',{rest:120}],
+ ['calf-raise','Calf Raise','isolation','calves','','none',{load:'bw+',rest:45}],
+ ['walk','Zone 2 Walk','conditioning','full-body','','none',{t:1,load:'none',rest:0}],
+];
+const EXERCISE_SEED_VERSION=1;
+const EX_CATALOG=EX_SEED.map(([id,name,pattern,pri,sec,equip,o])=>{
+  o=o||{};
+  const primary=pri?pri.split(','):[],secondary=sec?sec.split(','):[];
+  return{id,name,pattern,primary,secondary,
+    equipment:equip?equip.split(','):[],
+    unilateral:!!o.u,
+    metric:o.t?'time':'reps',
+    loadType:o.load||'external',
+    defaultRest:o.rest!=null?o.rest:(PATTERN_REST[pattern]||75),
+    region:(o.t||pattern==='conditioning')?'conditioning':(MUSCLE_REGION[primary[0]]||'other'),
+    aliases:o.alias?o.alias.split(','):[],
+    custom:false};
+});
 const DEFAULT_PROGRAM={
  days:{
   A:{title:'Day A — Lower + Push (Mon)',ex:[
@@ -580,6 +709,23 @@ async function askPlan(){
 /* ---------- Settings ---------- */
 let SET={k:'settings',targets:{kcal:2150,protein:180,carbs:190,fat:75},goalWeight:76.5,startWeight:83,theme:'dark'}; // Athletic Dark is the default identity
 async function loadSettings(){const s=await idbGet('kv','settings');if(s)SET=Object.assign(SET,s);}
+/* Exercise catalog: name/alias → entity. Replaces the name-guessing heuristics
+   (UNILATERAL_RE, rest-by-regex) with real data, and keys volume rollups. */
+let EXBYID={},EXBYNAME={};
+const exKey=s=>String(s||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+async function loadExercises(){
+  const all=await idbGetAll('exercises');
+  EXBYID={};EXBYNAME={};
+  for(const e of all){
+    EXBYID[e.id]=e;
+    EXBYNAME[exKey(e.name)]=e;
+    for(const a of e.aliases||[])if(!EXBYNAME[exKey(a)])EXBYNAME[exKey(a)]=e;
+  }
+}
+function exFind(name){ // by id first (v2 records), then name, then alias
+  if(!name)return null;
+  return EXBYID[name]||EXBYNAME[exKey(name)]||null;
+}
 async function loadProgram(){
   PROG=(await idbGet('kv','program'))?.v||PROG;
   EQUIP=(await idbGet('kv','equipment'))?.v||EQUIP;
@@ -601,11 +747,14 @@ async function loadProgram(){
     if(e.rest==null)e.rest=defaultRest(e);
     // unilateral work: reps are PER SIDE. Without this the app can't tell you
     // whether "3 × 10" means 10 per leg or 5 — the #1 logging ambiguity.
-    if(e.perSide==null)e.perSide=UNILATERAL_RE.test(e.name)||/\/\s*(leg|side|arm)|per (leg|side|arm)/i.test(e.target||'');
+    if(e.perSide==null)e.perSide=isUnilateral(e.name)||/\/\s*(leg|side|arm)|per (leg|side|arm)/i.test(e.target||'');
   }
 }
 const UNILATERAL_RE=/single[- ]?(leg|arm)|one[- ]?(leg|arm)|lunge|split squat|step[- ]?up|bulgarian|pistol|suitcase|turkish/i;
-function defaultRest(e){ // seconds, by how heavy/compound the movement is
+function isUnilateral(name){const c=exFind(name);return c?c.unilateral:UNILATERAL_RE.test(name||'');}
+function defaultRest(e){ // catalog is authoritative; name-guessing only for exercises it doesn't know
+  const c=exFind(e.name);
+  if(c)return c.defaultRest;
   if(e.mode==='time')return 30;
   const top=repTop(e.target);
   if(/squat|deadlift|bench|press|row|pull-?up|chin-?up|dip/i.test(e.name)&&(top==null||top<=8))
@@ -689,18 +838,19 @@ async function syncNow(){
     // late — the normal case, not the edge case. Full pull is cheap at single-user scale.
     const res2=await sb('/rest/v1/records?select=*&order=up.asc',{});
     if(!res2.ok)throw new Error('pull failed ('+res2.status+')');
-    const pulled=await res2.json();let applied=0,kvApplied=false;
+    const pulled=await res2.json();let applied=0,kvApplied=false,exApplied=false;
     for(const row of pulled){
       const isKv=row.store==='kv'&&SYNCED_KV.has(row.id);
       if(!SYNC_STORES.has(row.store)&&!isKv)continue;
       const local=await idbGet(row.store,row.id);
       if(row.deleted){
         // deletes obey last-write-wins too: a locally newer record (edit or reseed) beats an old tombstone
-        if(!isKv&&local&&(local.up||0)<row.up){await idbDel(row.store,row.id,true);applied++;}
+        if(!isKv&&local&&(local.up||0)<row.up){await idbDel(row.store,row.id,true);applied++;if(row.store==='exercises')exApplied=true;}
         continue;
       }
-      if(!local||(local.up||0)<row.up){await idbPut(row.store,row.data,true);applied++;if(isKv)kvApplied=true;}
+      if(!local||(local.up||0)<row.up){await idbPut(row.store,row.data,true);applied++;if(isKv)kvApplied=true;if(row.store==='exercises')exApplied=true;}
     }
+    if(exApplied)await loadExercises();   // rebuild the name/alias index before anything reads it
     if(kvApplied)await loadProgram();
     s.lastSync=Date.now();await saveSettings();
     return applied;
@@ -1218,13 +1368,20 @@ async function renderToday(){
 }
 
 /* ============================ FOOD ============================ */
+let foodRenderSeq=0;
 async function renderFood(){
+  // Re-entrant + async (it awaits IndexedDB), so a render started earlier can finish
+  // later and clobber a newer one — e.g. the unfiltered list overwriting your search
+  // results as you type. Only the most recent call is allowed to paint.
+  const seq=++foodRenderSeq;
+  const stale=()=>seq!==foodRenderSeq;
   $$('.seg [data-fseg]').forEach(b=>b.classList.toggle('on',b.dataset.fseg===foodSeg));
   const q=$('#foodSearch').value.trim().toLowerCase();
   const root=$('#foodList');
   if(foodSeg==='meals'){
     const meals=await idbGetAll('meals');const fmap=foodMap(await idbGetAll('foods'));
     const filt=meals.filter(m=>(m.name+' '+(m.day?DAY_FULL[m.day]:'')+' '+(m.slot||'')).toLowerCase().includes(q));
+    if(stale())return;
     if(!filt.length){root.innerHTML=`<div class="empty"><span class="ic">🍱</span>No meals found. Tap “Build a meal” to add your own.</div>`;return;}
     const mealRow=async m=>{const t=await mealMacros(m,fmap);
       return `<div class="foodrow" role="button" tabindex="0" data-logmeal="${m.id}"><div><div class="fn">${m.slot?`<span class="badge" style="font-size:10px;margin-right:6px">${esc(m.slot)}</span>`:''}${esc(m.name)}</div><div class="fs">${m.items.length} items · ${rnd(t.protein)}P ${rnd(t.carbs)}C ${rnd(t.fat)}F</div></div><div class="row" style="gap:7px"><div class="fk">${rnd(t.kcal)}<br>kcal</div><button class="pillbtn" data-editmeal="${m.id}" title="Edit meal">✎</button>${m.custom?`<button class="pillbtn" data-delmeal="${m.id}" title="Delete meal">✕</button>`:''}<span class="chev">›</span></div></div>`;};
@@ -1233,6 +1390,7 @@ async function renderFood(){
     let h='';let curDay='';
     for(const m of plan){if(m.day!==curDay){curDay=m.day;h+=`<div class="grp">${DAY_FULL[m.day]}</div>`;}h+=await mealRow(m);}
     if(custom.length){h+=`<div class="grp">My meals</div>`;for(const m of custom)h+=await mealRow(m);}
+    if(stale())return;
     root.innerHTML=h;return;
   }
   let foods=await idbGetAll('foods');
@@ -1250,11 +1408,13 @@ async function renderFood(){
   }
   foods=foods.filter(f=>f.name.toLowerCase().includes(q));
   const offBtn=q?`<button class="btn sec sm" id="offSearchBtn" style="width:100%;margin-top:10px">🌐 Search online for “${esc(q)}”</button>`:'';
+  if(stale())return;
   if(!foods.length){root.innerHTML=`<div class="empty"><span class="ic">🍽️</span>${foodSeg==='mine'?'No custom foods yet. Tap “Custom food”.':'No matches in your library.'}</div>`+offBtn;return;}
   const groups={};foods.forEach(f=>{(groups[f.group]=groups[f.group]||[]).push(f);});
   const gorder=['Protein','Dairy','Carbs','Fruit','Veg','Fats','Other','Online'];
   let h=recent;for(const g of gorder){if(!groups[g])continue;h+=`<div class="grp">${g}</div>`;
     groups[g].forEach(f=>{h+=foodRow(f);});}
+  if(stale())return;
   root.innerHTML=h+offBtn;
 }
 
@@ -1687,7 +1847,7 @@ async function startSession(dayKey,existing){
 function drawSession(session,lastMap,drafting){
   // sessions saved before modes existed: pull mode/rest from today's program
   session.exercises.forEach(ex=>{const pe=progEx(ex.name);if(!ex.mode)ex.mode=pe?.mode||'reps';if(ex.rest==null&&pe)ex.rest=pe.rest;
-    if(ex.perSide==null)ex.perSide=pe?pe.perSide:UNILATERAL_RE.test(ex.name);});
+    if(ex.perSide==null)ex.perSide=pe?pe.perSide:isUnilateral(ex.name);});
   const phFor=(ex,si)=>{const prev=(lastMap&&lastMap[ex.name]||[])[si]||{};
     return ex.mode==='time'
       ?{secs:prev.secs||+((String(ex.target).match(/(\d+)\s*s/)||[])[1])||'',rest:prev.rest||ex.rest||''}
@@ -1816,14 +1976,16 @@ function settingsModal(){
    <div class="in2" style="margin-top:10px"><div><label class="fl">Start weight (kg)</label><input id="stSW" type="number" step="0.1" value="${SET.startWeight}"></div><div><label class="fl">Goal weight (kg)</label><input id="stGW" type="number" step="0.1" value="${SET.goalWeight}"></div></div>
    <label class="fl">Cloud sync (Supabase — optional)</label>
    <input id="sbUrl" placeholder="Project URL (https://xxxx.supabase.co)" value="${esc(SET.sync?.url||'')}">
-   <div class="in2" style="margin-top:8px"><input id="sbEmail" type="email" placeholder="Email" autocomplete="off" value="${esc(SET.sync?.email||'')}"><input id="sbPass" type="password" placeholder="Password" autocomplete="new-password" value="${esc(SET.sync?.pass||'')}"></div>
-   <input id="sbAnon" type="password" placeholder="Publishable key (sb_publishable_…) or anon key" autocomplete="off" value="${esc(SET.sync?.anonKey||'')}" style="margin-top:8px">
+   <div class="in2" style="margin-top:8px"><input id="sbEmail" type="email" placeholder="Email" autocomplete="off" value="${esc(SET.sync?.email||'')}"><input id="sbPass" type="password" placeholder="${SET.sync?.pass?'Saved — leave blank to keep':'Password'}" autocomplete="new-password"></div>
+   <input id="sbAnon" type="password" placeholder="${SET.sync?.anonKey?'Saved — leave blank to keep':'Publishable key (sb_publishable_…) or anon key'}" autocomplete="off" style="margin-top:8px">
    <div class="row between" style="margin-top:8px"><span class="xs muted" id="sbStatus">${SET.sync?.lastSync?'Last synced '+new Date(SET.sync.lastSync).toLocaleString():'Not synced yet'}</span><button class="btn sec sm" id="sbSyncNow">Sync now</button></div>
    <button class="btn sec sm" style="margin-top:8px" id="sbLink">📱 Link another device</button>
    <p class="xs muted" style="margin:6px 0 0">One-time setup steps are in SETUP-SYNC.md. Data syncs across your devices; photos stay on-device (v1).</p>
    <label class="fl">AI assistant key (optional)</label>
-   <input id="stAI" type="password" placeholder="Anthropic API key (sk-ant-…)" value="${esc(SET.aiKey||'')}">
-   <p class="xs muted" style="margin:6px 0 0">Stored only on this device. Powers “Ask” on the 📖 Plan screen; without it, Ask searches the plan offline.</p>
+   <div class="row" style="gap:8px"><input id="stAI" type="password" autocomplete="off" style="flex:1"
+     placeholder="${SET.aiKey?'Key saved — leave blank to keep it':'Anthropic API key (sk-ant-…)'}">${
+     SET.aiKey?`<button class="btn ghost sm" id="stAIClear" style="flex:none">Remove</button>`:''}</div>
+   <p class="xs muted" style="margin:6px 0 0">Stored only on this device${SET.aiKey?' — never synced, and stripped from backups':''}. Powers “Ask” on the 📖 Plan screen; without it, Ask searches the plan offline.</p>
    <label class="fl">Notifications</label>
    <div class="row between"><span class="sm" id="ntStatus">…</span><button class="btn sec sm" id="ntBtn">Enable</button></div>
    <p class="xs muted" style="margin:6px 0 0">Coach alerts when you open the app, plus training-day &amp; log reminders on Android (installed app). On iPhone, alerts only appear while the app is open — Apple requires a push server for background delivery, which FitTrack deliberately doesn't use.</p>
@@ -1849,10 +2011,17 @@ function settingsModal(){
     if(p==='granted'){SET.notify=true;await saveSettings();registerPeriodic();toast('Notifications on');}
     ntPaint();
   };
+  // Secrets are never pre-filled into password inputs (browsers/password managers
+  // overwrite or blank them, and Save would then destroy the stored value).
+  // A blank secret field means "keep what's stored", never "erase it".
+  let clearAI=false;
   const readSyncFields=()=>{
-    const url=$('#sbUrl').value.trim(),anonKey=$('#sbAnon').value.trim(),email=$('#sbEmail').value.trim(),pass=$('#sbPass').value;
+    const url=$('#sbUrl').value.trim(),email=$('#sbEmail').value.trim();
+    const anonKey=$('#sbAnon').value.trim()||SET.sync?.anonKey||'';
+    const pass=$('#sbPass').value||SET.sync?.pass||'';
     SET.sync=(url||anonKey||email)?{...(SET.sync||{}),url,anonKey,email,pass}:null;
   };
+  const aiClr=$('#stAIClear');if(aiClr)aiClr.onclick=()=>{clearAI=true;$('#stAI').value='';$('#stAI').placeholder='Key will be removed on save';toast('Key removed on save');};
   $('#sbLink').onclick=()=>{readSyncFields();linkDeviceModal();};
   $('#sbSyncNow').onclick=async()=>{
     readSyncFields();await saveSettings();
@@ -1861,7 +2030,10 @@ function settingsModal(){
     try{const n=await syncNow();$('#sbStatus').textContent='Synced ✓ '+new Date().toLocaleTimeString();toast(n?`Synced — ${n} update${n>1?'s':''} pulled`:'Synced ✓');go(curView);}
     catch(err){$('#sbStatus').textContent='Sync failed';toast('Sync failed: '+err.message);}
   };
-  $('#stSave').onclick=async()=>{SET.targets={kcal:+$('#stK').value||0,protein:+$('#stP').value||0,carbs:+$('#stC').value||0,fat:+$('#stF').value||0,kcalTrain:+$('#stKT').value||null};SET.startWeight=+$('#stSW').value||83;SET.goalWeight=+$('#stGW').value||76.5;SET.aiKey=$('#stAI').value.trim();readSyncFields();await saveSettings();closeModal();toast('Settings saved');renderToday();if(curView==='plan')renderPlan();syncSoon();};
+  $('#stSave').onclick=async()=>{SET.targets={kcal:+$('#stK').value||0,protein:+$('#stP').value||0,carbs:+$('#stC').value||0,fat:+$('#stF').value||0,kcalTrain:+$('#stKT').value||null};SET.startWeight=+$('#stSW').value||83;SET.goalWeight=+$('#stGW').value||76.5;
+    const aiIn=$('#stAI').value.trim();
+    if(clearAI)SET.aiKey='';else if(aiIn)SET.aiKey=aiIn; // blank = keep the stored key
+    readSyncFields();await saveSettings();closeModal();toast('Settings saved');renderToday();if(curView==='plan')renderPlan();syncSoon();};
   $('#stExport').onclick=exportData;
   $('#stImport').onclick=()=>$('#stFile').click();
   $('#stFile').onchange=importData;
@@ -2017,6 +2189,16 @@ window.closeModal=closeModal;
 const MEAL_SEED_VERSION=3; // v3: restore seed meals wrongly deleted by pre-LWW sync tombstones (2026-07-29)
 async function seedIfEmpty(){
   const f=await idbGetAll('foods');if(!f.length)for(const x of SEED_FOODS)await idbPut('foods',x);
+  // Exercise catalog: versioned like meals, and seeded with fromSync=true so the
+  // built-ins carry no `up` stamp — only exercises YOU add or edit ever sync.
+  const exVer=(await idbGet('kv','exerciseSeedVersion'))?.v||0;
+  if(exVer<EXERCISE_SEED_VERSION){
+    for(const x of EX_CATALOG){
+      const cur=await idbGet('exercises',x.id);
+      if(!cur||!cur.custom)await idbPut('exercises',x,true); // never clobber a user's edits
+    }
+    await idbPut('kv',{k:'exerciseSeedVersion',v:EXERCISE_SEED_VERSION});
+  }
   // program & equipment: seed once, then they're user data (edited in-app, synced)
   if(!await idbGet('kv','program'))await idbPut('kv',{k:'program',v:DEFAULT_PROGRAM});
   if(!await idbGet('kv','equipment'))await idbPut('kv',{k:'equipment',v:DEFAULT_EQUIPMENT});
@@ -2030,7 +2212,9 @@ async function seedIfEmpty(){
   }
 }
 (async function init(){
-  await openDB();await seedIfEmpty();await loadSettings();await loadProgram();
+  await openDB();await seedIfEmpty();await loadSettings();
+  await loadExercises();   // must precede loadProgram — its migrations consult the catalog
+  await loadProgram();
   applyTheme();
   if(syncConfigured()&&navigator.onLine)syncNow().then(n=>{if(n)go(curView);}).catch(()=>{});
   $('#calTarget').textContent=SET.targets.kcal;
@@ -2039,6 +2223,7 @@ async function seedIfEmpty(){
   if('serviceWorker'in navigator){try{await navigator.serviceWorker.register('service-worker.js');}catch(e){}}
   notifyCoach();
   if(SET.notify)registerPeriodic();
+  document.body.dataset.ready='1'; // boot finished — automated checks wait on this
 })();
 </script>
 </body>
