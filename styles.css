@@ -126,6 +126,46 @@ h2.vt{
 .btn.danger{background:var(--danger-soft);color:var(--danger);box-shadow:none}
 .btn.sm{padding:9px 13px;font-size:13px;width:auto}
 .btnrow{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+/* ---- Today "Next up" hero: one card, one primary action ---- */
+.nextup{border-color:color-mix(in srgb,var(--volt) 30%,var(--line));margin-bottom:14px}
+.nextup.done{border-color:var(--line)}
+.nu-h{display:flex;justify-content:space-between;align-items:baseline;gap:10px;
+  font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px}
+.nu-day{letter-spacing:.04em;text-transform:none;font-weight:600}
+.nu-main{display:flex;align-items:center;justify-content:space-between;gap:14px;cursor:pointer;border-radius:12px}
+.nu-main:focus-visible{outline:2px solid var(--brand);outline-offset:3px}
+.nu-txt{flex:1;min-width:0}
+.nu-n{font-family:var(--font-display);font-size:26px;line-height:1.12;font-weight:700;letter-spacing:.01em;color:var(--ink)}
+.nu-n2{font-weight:700;font-size:15px;color:var(--ink)}
+.nu-s{font-size:13px;color:var(--muted);margin-top:3px}
+/* .btn is width:100% by default — inside the hero it must size to its label */
+.nu-main .btn,.nu-alt .btn{flex:none;width:auto;white-space:nowrap;padding:12px 22px}
+.nu-alt{display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;
+  margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+.nu-alt:focus-visible{outline:2px solid var(--brand);outline-offset:3px}
+.nu-rest{margin-top:10px;border-top:1px solid var(--line);padding-top:4px}
+.nu-rest summary{cursor:pointer;font-size:13px;color:var(--muted);padding:7px 2px;list-style:none}
+.nu-rest summary::-webkit-details-marker{display:none}
+.nu-rest summary::after{content:' ›';display:inline-block;transition:transform .18s}
+.nu-rest[open] summary::after{transform:rotate(90deg)}
+.nu-rest summary:hover{color:var(--ink)}
+.nu-more{display:flex;gap:8px;margin-top:12px}
+.nu-more .btn{flex:1}
+/* ---- Coach: collapsed to a single line; advice, not a task ---- */
+.coachcard{padding:0;margin-bottom:14px;overflow:hidden}
+.coach-sum{display:flex;align-items:center;gap:9px;cursor:pointer;padding:14px 16px;list-style:none}
+.coach-sum::-webkit-details-marker{display:none}
+.cs-dot{width:8px;height:8px;border-radius:50%;flex:none;background:var(--muted)}
+.cs-dot.warn{background:var(--c)}.cs-dot.good{background:var(--brand)}.cs-dot.info{background:var(--f)}
+.cs-t{flex:1;min-width:0;font-size:14px;font-weight:650;color:var(--ink);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cs-chev{color:var(--muted);transition:transform .18s;flex:none}
+.coachcard[open] .cs-chev{transform:rotate(90deg)}
+.coachcard .insight:first-of-type{margin-top:0}
+.coachcard>*:not(summary){margin-left:16px;margin-right:16px}
+.coachcard>*:last-child{margin-bottom:14px}
+.calfoot{display:flex;gap:8px;justify-content:center;margin-top:12px}
+.calfoot b{color:var(--ink)}
 .btnrow.q{grid-template-columns:repeat(4,1fr);margin-bottom:14px}
 .qbtn{
   background:var(--card);border:1px solid var(--line);border-radius:var(--r-md);
@@ -385,7 +425,8 @@ canvas{width:100%;height:auto;display:block}
   .view{max-width:760px;padding:24px 28px 40px}
   /* Today becomes a two-column dashboard */
   #view-today{max-width:1120px}
-  .tgrid{display:grid;grid-template-columns:400px minmax(0,1fr);gap:0 22px;align-items:start}
+  /* 380px was too narrow for the hero and left a dead gutter beside the ring */
+  .tgrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);gap:0 22px;align-items:start}
   #view-plan{max-width:860px}
 }
 @media(max-width:939.9px){

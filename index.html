@@ -51,6 +51,7 @@
 
   <div class="tgrid">
     <div class="tcol-a">
+      <div id="todayNext"></div>
       <div class="card">
         <div class="cal-wrap">
           <div class="ring">
@@ -66,25 +67,18 @@
             <div class="mbar"><div class="top"><span>Fat</span><span id="fTxt">0 / 75 g</span></div><div class="track"><div class="fill" id="fFill" style="background:var(--f);width:0"></div></div></div>
           </div>
         </div>
-        <div class="row between sm muted" style="margin-top:12px">
-          <span>Eaten: <b id="calEaten" style="color:var(--ink)">0</b> kcal</span>
-          <span>Target: <b id="calTarget" style="color:var(--ink)">2150</b> kcal <span class="xs muted" id="tgtMode"></span></span>
+        <div class="calfoot sm muted">
+          <span><b id="calEaten">0</b> eaten</span><span aria-hidden="true">·</span>
+          <span><b id="calTarget">2150</b> target</span><span class="xs muted" id="tgtMode"></span>
         </div>
-      </div>
-      <div class="btnrow q" style="margin-bottom:14px">
-        <button class="qbtn" data-quick="food"><svg><use href="#i-food"/></svg>Log food</button>
-        <button class="qbtn" data-quick="meal"><svg><use href="#i-meal"/></svg>Log meal</button>
-        <button class="qbtn" data-quick="weight"><svg><use href="#i-scale"/></svg>Weigh-in</button>
-        <button class="qbtn" data-quick="train"><svg><use href="#i-dumbbell"/></svg>Workout</button>
       </div>
       <div id="todayWater"></div>
     </div>
     <div class="tcol-b">
       <div id="todayHow"></div>
-      <div id="todayPlan"></div>
       <div id="todayCoach"></div>
-      <div id="todaySummary"></div>
       <div id="todayFood"></div>
+      <div id="todaySummary"></div>
       <div id="todayWeek"></div>
     </div>
   </div>
@@ -1029,9 +1023,12 @@ async function renderCoach(){
     fired.push({id:r.id,sev:r.sev,...res});
   }
   const order={warn:0,good:1,info:2};fired.sort((a,b)=>order[a.sev]-order[b.sev]);
-  $('#todayCoach').innerHTML=fired.length?`<div class="card"><div class="meal-h" style="margin-top:0"><span>🧠 Coach</span><span class="badge">${fired.length}</span></div>${
+  // Collapsed by default: the Coach is advice, not a task. Three paragraphs of prose
+  // on the dashboard drowned out the one thing you actually came here to do.
+  const worst=fired[0];
+  $('#todayCoach').innerHTML=fired.length?`<details class="card coachcard"><summary class="coach-sum"><span class="cs-dot ${worst.sev}" aria-hidden="true"></span><span class="cs-t">${worst.t}</span>${fired.length>1?`<span class="badge">+${fired.length-1}</span>`:''}<span class="cs-chev" aria-hidden="true">›</span></summary>${
     fired.slice(0,4).map(i=>`<div class="insight ${i.sev}"><div><div class="n">${i.t}</div><div class="s">${i.b}</div></div><button class="pillbtn" data-dismissinsight="${i.id}" aria-label="Dismiss insight">✕</button></div>`).join('')
-  }${fired.length>4?`<div class="xs muted center" style="margin-top:6px">+${fired.length-4} more after these are handled</div>`:''}</div>`:'';
+  }${fired.length>4?`<div class="xs muted center" style="margin-top:6px">+${fired.length-4} more after these are handled</div>`:''}</details>`:'';
 }
 
 /* ---------- Notifications (opt-in; local only — no push server) ---------- */
@@ -1092,7 +1089,10 @@ async function renderToday(){
   const meas=(await idbByDate('measurements',curDate))[0];
   let sum='';
   if(meas){sum+=`<div class="card"><div class="row between"><div><span class="badge">⚖️ Weigh-in</span> <b style="margin-left:6px">${meas.weight??'–'} kg</b>${meas.waist?` · waist ${meas.waist} cm`:''}</div></div></div>`;}
-  if(wos.length){wos.forEach(w=>{const done=w.exercises.reduce((n,e)=>n+e.sets.filter(s=>s.reps||s.secs).length,0);sum+=`<div class="card sessioncard"><div class="row between"><div><span class="badge">🏋️ ${esc(w.title.split('—')[0].trim())}</span> <span class="sm muted">${done} sets logged</span></div><button class="pillbtn" data-openwo="${w.id}">View</button></div></div>`;});}
+  // an empty session (accidental tap → "Finish") is noise, not history — don't give it a card
+  if(wos.length){wos.forEach(w=>{const done=w.exercises.reduce((n,e)=>n+e.sets.filter(s=>s.reps||s.secs).length,0);
+    if(!done)return;
+    sum+=`<div class="card sessioncard"><div class="row between"><div><span class="badge">🏋️ ${esc(w.title.split('—')[0].trim())}</span> <span class="sm muted">${done} sets logged</span></div><button class="pillbtn" data-openwo="${w.id}">View</button></div></div>`;});}
   $('#todaySummary').innerHTML=sum;
 
   // food entries by meal
@@ -1108,27 +1108,58 @@ async function renderToday(){
   }
   $('#todayFood').innerHTML=any?`<div class="card">${html}</div>`:`<div class="empty"><span class="ic">🍽️</span>No food logged yet.<br>Tap “Log food” or “Log meal” above.<br><button class="btn sec sm" data-repeatday style="margin-top:12px">↻ Repeat yesterday’s log</button></div>`;
 
-  // the seeded plan for this weekday: meals per slot + training-day shortcut
+  /* NEXT UP — the dashboard answers one question: what do I do now?
+     Replaces the old four quick-action buttons + full plan card + separate
+     "Log next", which between them gave four competing calls to action. */
   const dayAbbr=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][parseD(curDate).getDay()];
   const planMeals=(await idbGetAll('meals')).filter(m=>!m.custom&&m.day===dayAbbr)
     .sort((a,b)=>(SLOT_ORDER[a.slot]??9)-(SLOT_ORDER[b.slot]??9));
-  let plan='';
-  if(planMeals.length){
-    const fmap=foodMap(await idbGetAll('foods'));
-    const woKey=PROG.days[PROG.schedule[dayAbbr]]?PROG.schedule[dayAbbr]:null;
-    let rows='';
-    let nextFound=false;
-    for(const m of planMeals){
-      const t=await mealMacros(m,fmap);
-      const done=!!(grouped[SLOT_KEY[m.slot]]||[]).length;
-      const isNext=!done&&!nextFound;if(isNext)nextFound=true; // the one action that matters most gets the primary button
-      rows+=`<div class="entry planrow${done?' done':''}" role="button" tabindex="0" data-logmeal="${m.id}"><div><div class="n">${done?'✓ ':''}${esc(m.name)}</div><div class="s">${esc(m.slot)} · ${rnd(t.kcal)} kcal · ${rnd(t.protein)}P · tap for details</div></div>${done?'':`<button class="${isNext?'btn sm':'pillbtn'}" data-logmeal="${m.id}">${isNext?'Log next':'Log'}</button>`}</div>`;
-    }
-    if(woKey&&!wos.length)
-      rows+=`<div class="entry planrow" role="button" tabindex="0" data-startday="${woKey}"><div><div class="n">🏋️ ${esc(PROG.days[woKey].title.split('—')[1]?.trim()||PROG.days[woKey].title)}</div><div class="s">Training day · tap to start</div></div><button class="pillbtn" data-startday="${woKey}">Start</button></div>`;
-    plan=`<div class="card"><div class="meal-h" style="margin-top:0"><span>${DAY_FULL[dayAbbr]}’s plan</span>${woKey?`<span class="badge">🏋️ Day ${woKey}</span>`:`<span class="badge" style="background:var(--soft);color:var(--muted)">Rest day</span>`}</div>${rows}</div>`;
+  const woKey=PROG.days[PROG.schedule[dayAbbr]]?PROG.schedule[dayAbbr]:null;
+  const woPending=woKey&&!wos.length;
+  const fmap=foodMap(await idbGetAll('foods'));
+  const mealState=[];
+  for(const m of planMeals)
+    mealState.push({m,done:!!(grouped[SLOT_KEY[m.slot]]||[]).length,t:await mealMacros(m,fmap)});
+  const next=mealState.find(x=>!x.done);
+  const left=mealState.filter(x=>!x.done).length;
+
+  let hero='';
+  if(next){
+    hero=`<div class="card nextup">
+      <div class="nu-h"><span>Next up</span><span class="nu-day">${DAY_FULL[dayAbbr]}${woKey?` · 🏋️ Day ${woKey}`:' · rest day'}</span></div>
+      <div class="nu-main" role="button" tabindex="0" data-logmeal="${next.m.id}">
+        <div class="nu-txt"><div class="nu-n">${esc(next.m.name)}</div>
+          <div class="nu-s">${esc(next.m.slot)} · ${rnd(next.t.kcal)} kcal · ${rnd(next.t.protein)} g protein</div></div>
+        <button class="btn" data-logmeal="${next.m.id}">Log it</button>
+      </div>
+      ${woPending?`<div class="nu-alt" role="button" tabindex="0" data-startday="${woKey}">
+        <div><div class="nu-n2">🏋️ ${esc(PROG.days[woKey].title.split('—')[1]?.trim()||PROG.days[woKey].title)}</div>
+          <div class="nu-s">Training day — sets pre-filled from last time</div></div>
+        <button class="btn sec sm" data-startday="${woKey}">Start</button></div>`:''}
+      ${left>1?`<details class="nu-rest"><summary>${left-1} more meal${left>2?'s':''} today</summary>${
+        mealState.filter(x=>x!==next).map(x=>`<div class="entry planrow${x.done?' done':''}" role="button" tabindex="0" data-logmeal="${x.m.id}"><div><div class="n">${x.done?'✓ ':''}${esc(x.m.name)}</div><div class="s">${esc(x.m.slot)} · ${rnd(x.t.kcal)} kcal · ${rnd(x.t.protein)}P</div></div>${x.done?'':`<button class="pillbtn" data-logmeal="${x.m.id}">Log</button>`}</div>`).join('')
+      }</details>`:''}
+      <div class="nu-more"><button class="btn ghost sm" data-quick="food">+ Something else</button><button class="btn ghost sm" data-quick="weight">⚖️ Weigh in</button></div>
+    </div>`;
+  }else if(woPending){
+    hero=`<div class="card nextup">
+      <div class="nu-h"><span>Next up</span><span class="nu-day">${DAY_FULL[dayAbbr]} · 🏋️ Day ${woKey}</span></div>
+      <div class="nu-main" role="button" tabindex="0" data-startday="${woKey}">
+        <div class="nu-txt"><div class="nu-n">${esc(PROG.days[woKey].title.split('—')[1]?.trim()||PROG.days[woKey].title)}</div>
+          <div class="nu-s">Food's all logged — sets pre-filled from last time</div></div>
+        <button class="btn" data-startday="${woKey}">Start</button>
+      </div>
+      <div class="nu-more"><button class="btn ghost sm" data-quick="food">+ Something else</button><button class="btn ghost sm" data-quick="weight">⚖️ Weigh in</button></div>
+    </div>`;
+  }else if(mealState.length||wos.length){
+    hero=`<div class="card nextup done">
+      <div class="nu-h"><span>Today</span><span class="nu-day">${DAY_FULL[dayAbbr]}</span></div>
+      <div class="nu-main"><div class="nu-txt"><div class="nu-n">✓ All done</div>
+        <div class="nu-s">${rnd(tot.kcal)} kcal · ${rnd(tot.protein)} g protein${wos.length?' · session logged':''}</div></div></div>
+      <div class="nu-more"><button class="btn ghost sm" data-quick="food">+ Something else</button><button class="btn ghost sm" data-quick="weight">⚖️ Weigh in</button></div>
+    </div>`;
   }
-  $('#todayPlan').innerHTML=plan;
+  $('#todayNext').innerHTML=hero;
 
   // this week at a glance (Mon-based): intake vs target, sessions, weight trend
   {
