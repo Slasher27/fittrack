@@ -335,20 +335,20 @@ const EX_TYPES=['barbell-lower','barbell-upper','dumbbell','kettlebell','bodywei
 const DEFAULT_PROGRAM={
  days:{
   A:{title:'Day A — Lower + Push (Mon)',ex:[
-    {name:'Back Squat',target:'4 × 5',type:'barbell-lower'},{name:'Bench Press',target:'3 × 6–8',type:'barbell-upper'},
-    {name:'Romanian Deadlift',target:'3 × 8–10',type:'barbell-lower'},{name:'Pull-ups',target:'3 × 6–10',type:'bodyweight'},
-    {name:'KB Goblet Reverse Lunge',target:'3 × 10/leg',type:'kettlebell'},{name:'Hanging Leg Raise',target:'3 × 10–15',type:'bodyweight'},
-    {name:'KB Swings',target:'5 × 20',type:'kettlebell'}]},
+    {name:'Back Squat',target:'4 × 5',type:'barbell-lower',rest:150},{name:'Bench Press',target:'3 × 6–8',type:'barbell-upper',rest:120},
+    {name:'Romanian Deadlift',target:'3 × 8–10',type:'barbell-lower',rest:90},{name:'Pull-ups',target:'3 × 6–10',type:'bodyweight',rest:90},
+    {name:'KB Goblet Reverse Lunge',target:'3 × 10',type:'kettlebell',rest:75,perSide:true},{name:'Hanging Leg Raise',target:'3 × 10–15',type:'bodyweight',rest:60},
+    {name:'KB Swings',target:'5 × 20',type:'kettlebell',rest:60}]},
   B:{title:'Day B — Upper + Pull (Wed)',ex:[
-    {name:'Deadlift',target:'4 × 4–5',type:'barbell-lower'},{name:'Overhead Press',target:'3 × 6–8',type:'barbell-upper'},
-    {name:'Barbell Row',target:'3 × 8–10',type:'barbell-upper'},{name:'Weighted Dips',target:'3 × 8–10',type:'bodyweight'},
-    {name:'Lat Pulldown',target:'3 × 12',type:'other'},{name:'Lateral Raise',target:'3 × 15',type:'dumbbell'},
+    {name:'Deadlift',target:'4 × 4–5',type:'barbell-lower',rest:150},{name:'Overhead Press',target:'3 × 6–8',type:'barbell-upper',rest:120},
+    {name:'Barbell Row',target:'3 × 8–10',type:'barbell-upper',rest:90},{name:'Weighted Dips',target:'3 × 8–10',type:'bodyweight',rest:90},
+    {name:'Lat Pulldown',target:'3 × 12',type:'other',rest:75},{name:'Lateral Raise',target:'3 × 15',type:'dumbbell',rest:60},
     {name:'Skipping intervals',target:'8 × 40s',type:'other',mode:'time',rest:20}]},
   C:{title:'Day C — Full body (Fri)',ex:[
-    {name:'Front Squat',target:'3 × 6–8',type:'barbell-lower'},{name:'Incline Bench Press',target:'3 × 8–10',type:'barbell-upper'},
-    {name:'Chin-ups',target:'3 × AMRAP',type:'bodyweight'},{name:'KB Single-leg RDL',target:'3 × 10–12',type:'kettlebell'},
-    {name:'DB Curl',target:'3 × 12–15',type:'dumbbell'},{name:'Triceps Pushdown',target:'3 × 12–15',type:'other'},
-    {name:'Core circuit',target:'3 rounds',type:'other'}]},
+    {name:'Front Squat',target:'3 × 6–8',type:'barbell-lower',rest:120},{name:'Incline Bench Press',target:'3 × 8–10',type:'barbell-upper',rest:120},
+    {name:'Chin-ups',target:'3 × AMRAP',type:'bodyweight',rest:90},{name:'KB Single-leg RDL',target:'3 × 10–12',type:'kettlebell',rest:75,perSide:true},
+    {name:'DB Curl',target:'3 × 12–15',type:'dumbbell',rest:60},{name:'Triceps Pushdown',target:'3 × 12–15',type:'other',rest:60},
+    {name:'Core circuit',target:'3 rounds',type:'other',rest:45}]},
  },
  schedule:{Mon:'A',Wed:'B',Fri:'C'}, // weekday → dayKey
 };
@@ -602,7 +602,24 @@ async function loadProgram(){
   for(const d of Object.values(PROG.days))for(const e of d.ex){
     if(!e.mode)e.mode=/\d\s*s\b/i.test(e.target)||/skip|interval|plank|hold/i.test(e.name)?'time':'reps';
     if(e.mode==='time'&&e.rest==null)e.rest=/skip/i.test(e.name)?20:30;
+    // programs stored before per-exercise rest existed fell back to a flat 90 s;
+    // restore the plan's real rest periods (main lifts breathe, isolation doesn't)
+    if(e.rest==null)e.rest=defaultRest(e);
+    // unilateral work: reps are PER SIDE. Without this the app can't tell you
+    // whether "3 × 10" means 10 per leg or 5 — the #1 logging ambiguity.
+    if(e.perSide==null)e.perSide=UNILATERAL_RE.test(e.name)||/\/\s*(leg|side|arm)|per (leg|side|arm)/i.test(e.target||'');
   }
+}
+const UNILATERAL_RE=/single[- ]?(leg|arm)|one[- ]?(leg|arm)|lunge|split squat|step[- ]?up|bulgarian|pistol|suitcase|turkish/i;
+function defaultRest(e){ // seconds, by how heavy/compound the movement is
+  if(e.mode==='time')return 30;
+  const top=repTop(e.target);
+  if(/squat|deadlift|bench|press|row|pull-?up|chin-?up|dip/i.test(e.name)&&(top==null||top<=8))
+    return /squat|deadlift/i.test(e.name)?150:120;
+  if(e.type==='barbell-lower'||e.type==='barbell-upper')return 90;
+  if(e.type==='bodyweight')return 90;
+  if(top!=null&&top>=12)return 60;
+  return 75;
 }
 async function saveSettings(){await idbPut('kv',SET);}
 
@@ -866,6 +883,13 @@ let chartRange=90; // weight chart window in days; 0 = all
 /* ---------- Food maths ---------- */
 function foodMap(list){const m={};for(const f of list)m[f.id]=f;return m;}
 function scale(food,servings){return{kcal:food.kcal*servings,protein:food.protein*servings,carbs:food.carbs*servings,fat:food.fat*servings};}
+/* Weight/volume servings ("100 g", "250 ml") are shown as a plain amount — "180 g",
+   not "1.8 × 100 g". Anchored so "1 scoop (30 g)" stays a count. */
+function servingUnit(serving){const m=String(serving||'').match(/^(\d+(?:\.\d+)?)\s*(g|ml)\b/i);
+  return m?{base:parseFloat(m[1]),unit:m[2].toLowerCase()}:null;}
+function qtyLabel(serving,servings){const u=servingUnit(serving);
+  const n=x=>(Math.round(x*10)/10+'').replace(/\.0$/,'');
+  return u?`${n(servings*u.base)} ${u.unit}`:`${n(servings)} × ${serving||''}`;}
 async function mealMacros(meal,fmap){fmap=fmap||foodMap(await idbGetAll('foods'));let t={kcal:0,protein:0,carbs:0,fat:0};if(!meal||!meal.items)return t;for(const it of meal.items){const f=fmap[it.foodId];if(!f)continue;const s=scale(f,it.servings);for(const k in t)t[k]+=s[k];}return t;}
 
 /* ============================ COACH (insights engine) ============================ */
@@ -1080,7 +1104,7 @@ async function renderToday(){
   let any=false;
   for(const slot of order){const es=grouped[slot];if(!es||!es.length)continue;any=true;let sk=es.reduce((n,e)=>n+e.kcal,0);
     html+=`<div class="meal-h"><span>${labels[slot]}</span><span>${rnd(sk)} kcal</span></div>`;
-    es.forEach(e=>{html+=`<div class="entry planrow" role="button" tabindex="0" data-editlog="${e.id}"><div><div class="n">${esc(e.name)}</div><div class="s">${(+e.servings).toString().replace(/\.0$/,'')} × ${esc(e.serving||'')} · ${rnd(e.protein)}P ${rnd(e.carbs)}C ${rnd(e.fat)}F · tap to edit</div></div><div class="row" style="gap:8px"><div class="k">${rnd(e.kcal)}</div><button class="pillbtn" data-dellog="${e.id}" aria-label="Remove logged item">✕</button></div></div>`;});
+    es.forEach(e=>{html+=`<div class="entry planrow" role="button" tabindex="0" data-editlog="${e.id}"><div><div class="n">${esc(e.name)}</div><div class="s">${esc(qtyLabel(e.serving,+e.servings))} · ${rnd(e.protein)}P ${rnd(e.carbs)}C ${rnd(e.fat)}F · tap to edit</div></div><div class="row" style="gap:8px"><div class="k">${rnd(e.kcal)}</div><button class="pillbtn" data-dellog="${e.id}" aria-label="Remove logged item">✕</button></div></div>`;});
   }
   $('#todayFood').innerHTML=any?`<div class="card">${html}</div>`:`<div class="empty"><span class="ic">🍽️</span>No food logged yet.<br>Tap “Log food” or “Log meal” above.<br><button class="btn sec sm" data-repeatday style="margin-top:12px">↻ Repeat yesterday’s log</button></div>`;
 
@@ -1262,12 +1286,16 @@ function closeModal(){clearInterval(restInt);$('#modalRoot').innerHTML='';docume
 
 async function logFoodModal(foodId){
   const f=await idbGet('foods',foodId);if(!f)return;
-  const gramBased=/\bg\b|ml/.test(f.serving) && /^\d/.test(f.serving);
+  // Weight/volume foods ("100 g", "250 ml") are logged in their own unit — you type
+  // 180 for 180 g, not 1.8 servings. Countable foods ("1 egg") stay as counts.
+  // NB the anchored match deliberately excludes labels like "1 scoop (30 g)".
+  const wt=f.serving.match(/^(\d+(?:\.\d+)?)\s*(g|ml)\b/i);
+  const base=wt?parseFloat(wt[1]):0,unit=wt?wt[2].toLowerCase():'';
   openModal(`
     <div class="mh"><h3>${esc(f.name)}</h3><button class="x" onclick="closeModal()">✕</button></div>
     <p class="sm muted" style="margin:0 0 4px">Per ${esc(f.serving)}: ${f.kcal} kcal · ${f.protein}P ${f.carbs}C ${f.fat}F</p>
-    <label class="fl">Servings (${esc(f.serving)})</label>
-    <input id="mServ" type="number" inputmode="decimal" step="0.1" value="1" min="0">
+    <label class="fl">${wt?`Amount (${unit})`:`Servings (${esc(f.serving)})`}</label>
+    <input id="mServ" type="number" inputmode="decimal" step="${wt?'1':'0.1'}" value="${wt?base:1}" min="0">
     <div class="sm muted" id="mCalc" style="margin-top:8px"></div>
     <label class="fl">Meal</label>
     <select id="mSlot">
@@ -1276,12 +1304,13 @@ async function logFoodModal(foodId){
     <label class="fl">Date</label>
     <input id="mDate" type="date" value="${curDate}">
     <button class="btn" style="margin-top:16px" id="mSave">Add to log</button>`);
-  const upd=()=>{const s=parseFloat($('#mServ').value)||0;const m=scale(f,s);
-    $('#mCalc').innerHTML=`= <b style="color:var(--ink)">${rnd(m.kcal)} kcal</b> · ${rnd(m.protein)}P ${rnd(m.carbs)}C ${rnd(m.fat)}F${gramBased?` · ~${rnd(s*parseFloat(f.serving))} ${f.serving.replace(/[\d. ]/g,'')}`:''}`;};
+  const servings=()=>{const v=parseFloat($('#mServ').value)||0;return wt?v/base:v;};
+  const upd=()=>{const s=servings();const m=scale(f,s);
+    $('#mCalc').innerHTML=`= <b style="color:var(--ink)">${rnd(m.kcal)} kcal</b> · ${rnd(m.protein)}P ${rnd(m.carbs)}C ${rnd(m.fat)}F`;};
   const slotGuess={breakfast:[0,10],lunch:[11,14],snack:[14,17],dinner:[17,23]};const hr=new Date().getHours();
   for(const[k,[a,b]]of Object.entries(slotGuess))if(hr>=a&&hr<=b)$('#mSlot').value=k;
   $('#mServ').addEventListener('input',upd);upd();
-  $('#mSave').onclick=async()=>{const s=parseFloat($('#mServ').value)||0;if(s<=0)return;const m=scale(f,s);
+  $('#mSave').onclick=async()=>{const s=servings();if(s<=0)return;const m=scale(f,s);
     const date=$('#mDate').value,slot=$('#mSlot').value;
     await idbPut('log',{id:uid(),date,meal:slot,foodId:f.id,name:f.name,serving:f.serving,servings:s,kcal:m.kcal,protein:m.protein,carbs:m.carbs,fat:m.fat,ts:Date.now()});
     closeModal();buzz();toast('Logged '+f.name);curDate=date;go('today');};
@@ -1292,10 +1321,7 @@ async function logMealModal(mealId){
   if(!meal){toast('That meal no longer exists');renderToday();if(curView==='food')renderFood();return;}
   const fmap=foodMap(await idbGetAll('foods'));const t=await mealMacros(meal,fmap);
   const rows=meal.items.map(it=>{const f=fmap[it.foodId];if(!f)return '';const m=scale(f,it.servings);
-    const wt=f.serving.match(/^(\d+(?:\.\d+)?)\s*(g|ml)\b/i);
-    const grams=wt?` · ${rnd(it.servings*parseFloat(wt[1]))} ${wt[2]}`:'';
-    const qty=(it.servings+'').replace(/\.0$/,'');
-    return `<div class="entry"><div><div class="n">${esc(f.name)}</div><div class="s">${qty} × ${esc(f.serving)}${grams}</div></div><div class="k">${rnd(m.kcal)}<div class="xs muted" style="font-weight:600">${rnd(m.protein)}P ${rnd(m.carbs)}C ${rnd(m.fat)}F</div></div></div>`;
+    return `<div class="entry"><div><div class="n">${esc(f.name)}</div><div class="s">${esc(qtyLabel(f.serving,it.servings))}</div></div><div class="k">${rnd(m.kcal)}<div class="xs muted" style="font-weight:600">${rnd(m.protein)}P ${rnd(m.carbs)}C ${rnd(m.fat)}F</div></div></div>`;
   }).join('');
   const slotSel=meal.slot?SLOT_KEY[meal.slot]:'lunch';
   openModal(`<div class="mh"><h3>${esc(meal.name)}</h3><div class="row" style="gap:6px"><button class="pillbtn" id="mEdit" aria-label="Edit meal">✎ Edit</button><button class="x" onclick="closeModal()">✕</button></div></div>
@@ -1319,21 +1345,23 @@ async function editLogModal(id){
   if(!e){toast('Entry no longer exists');renderToday();return;}
   const unit=+e.servings>0?{kcal:e.kcal/e.servings,protein:e.protein/e.servings,carbs:e.carbs/e.servings,fat:e.fat/e.servings}
     :{kcal:e.kcal,protein:e.protein,carbs:e.carbs,fat:e.fat};
+  const eu=servingUnit(e.serving); // weight foods edit in g/ml, not servings
   openModal(`<div class="mh"><h3>Edit entry</h3><button class="x" onclick="closeModal()">✕</button></div>
     <p class="sm muted" style="margin:0 0 4px">${esc(e.name)} — per ${esc(e.serving||'serving')}: ${rnd(unit.kcal)} kcal · ${rnd(unit.protein)}P</p>
-    <label class="fl" for="elServ">Servings (${esc(e.serving||'serving')})</label>
-    <input id="elServ" type="number" inputmode="decimal" step="0.1" min="0.1" value="${e.servings}">
+    <label class="fl" for="elServ">${eu?`Amount (${eu.unit})`:`Servings (${esc(e.serving||'serving')})`}</label>
+    <input id="elServ" type="number" inputmode="decimal" step="${eu?'1':'0.1'}" min="0" value="${eu?Math.round(e.servings*eu.base*10)/10:e.servings}">
     <div class="sm muted" id="elCalc" style="margin-top:8px"></div>
     <label class="fl" for="elSlot">Meal</label>
     <select id="elSlot">${['breakfast','lunch','snack','dinner'].map(s=>`<option value="${s}"${s===e.meal?' selected':''}>${s[0].toUpperCase()+s.slice(1)}</option>`).join('')}</select>
     <label class="fl" for="elDate">Date</label><input id="elDate" type="date" value="${e.date}">
     <button class="btn" style="margin-top:16px" id="elSave">Save changes</button>
     <button class="btn danger sm" style="margin-top:8px;width:100%" id="elDel">Delete entry</button>`);
-  const upd=()=>{const s=parseFloat($('#elServ').value)||0;
+  const elServings=()=>{const v=parseFloat($('#elServ').value)||0;return eu?v/eu.base:v;};
+  const upd=()=>{const s=elServings();
     $('#elCalc').innerHTML=`= <b style="color:var(--ink)">${rnd(unit.kcal*s)} kcal</b> · ${rnd(unit.protein*s)}P ${rnd(unit.carbs*s)}C ${rnd(unit.fat*s)}F`;};
   $('#elServ').addEventListener('input',upd);upd();
   $('#elSave').onclick=async()=>{
-    const s=parseFloat($('#elServ').value)||0;if(s<=0)return toast('Servings must be above 0');
+    const s=elServings();if(s<=0)return toast(eu?'Amount must be above 0':'Servings must be above 0');
     const date=$('#elDate').value,slot=$('#elSlot').value;
     await idbPut('log',{...e,servings:s,meal:slot,date,kcal:unit.kcal*s,protein:unit.protein*s,carbs:unit.carbs*s,fat:unit.fat*s});
     closeModal();buzz();toast('Entry updated');curDate=date;renderToday();};
@@ -1505,7 +1533,7 @@ function viewPhotoModal(id){idbGet('photos',id).then(p=>{
 /* ============================ TRAIN ============================ */
 async function renderTrainStart(){
   const draft=(await idbGet('kv','woDraft'))?.v;
-  const resume=draft&&PROG.days[draft.dayKey]?`<button class="btn" style="width:100%;margin-bottom:8px" data-startday="${draft.dayKey}">⏵ Resume ${esc(draft.title.split('—')[0].trim())} — unfinished session</button>`:'';
+  const resume=draft&&PROG.days[draft.dayKey]?`<div class="row" style="gap:8px;margin-bottom:8px"><button class="btn" style="flex:1;text-align:left" data-startday="${draft.dayKey}">⏵ Resume ${esc(draft.title.split('—')[0].trim())} — unfinished session</button><button class="pillbtn" data-discarddraft aria-label="Discard unfinished session" style="align-self:stretch">✕</button></div>`:'';
   $('#dayBtns').innerHTML=resume+Object.entries(PROG.days).map(([k,v])=>
     `<div class="row" style="gap:8px"><button class="btn sec" style="flex:1;text-align:left" data-startday="${k}">▶︎ ${esc(v.title)}</button><button class="pillbtn" data-editday="${k}" aria-label="Edit ${esc(v.title)}" style="align-self:stretch">✎</button></div>`).join('')
     +`<div class="btnrow" style="margin-top:6px"><button class="btn ghost sm" data-addday style="width:100%">+ Add day</button><button class="btn ghost sm" id="gymBtn" style="width:100%">🎒 My gym</button></div>`;
@@ -1531,12 +1559,13 @@ function editDayModal(key){
      <select id="pdType" aria-label="Equipment type" style="flex:1.2">${EX_TYPES.map(t=>`<option>${t}</option>`).join('')}</select>
      <select id="pdMode" aria-label="Logged as" style="flex:1"><option value="reps">kg × reps</option><option value="time">timed (s)</option></select>
      <input id="pdRest" type="number" inputmode="numeric" placeholder="rest s" aria-label="Rest seconds" style="flex:.7">
+     <label class="pillbtn" style="cursor:pointer;display:inline-flex;align-items:center;flex:none"><input type="checkbox" id="pdSide" style="width:auto;margin-right:5px">per side</label>
      <button class="btn sm sec" id="pdAdd" style="flex:none">Add</button>
    </div>
    ${!isNew&&Object.keys(PROG.days).length>1?`<button class="btn danger sm" id="pdDelete" style="margin-top:12px;width:100%">Delete this day</button>`:''}
    <button class="btn" style="margin-top:10px" id="pdSave">${isNew?'Create day':'Save changes'}</button>`);
   const draw=()=>{$('#pdList').innerHTML=day.ex.length?day.ex.map((e,i)=>
-    `<div class="entry"><div><div class="n">${esc(e.name)}</div><div class="s">${esc(e.target)} · ${esc(e.type||'other')}${e.mode==='time'?' · timed':''}${e.rest?` · rest ${e.rest}s`:''}</div></div><div class="row" style="gap:6px">${i>0?`<button class="pillbtn" data-up="${i}" aria-label="Move ${esc(e.name)} up">↑</button>`:''}<button class="pillbtn" data-rm="${i}" aria-label="Remove ${esc(e.name)}">✕</button></div></div>`).join('')
+    `<div class="entry"><div><div class="n">${esc(e.name)}</div><div class="s">${esc(e.target)}${e.perSide?' per side':''} · ${esc(e.type||'other')}${e.mode==='time'?' · timed':''}${e.rest?` · rest ${restLabel(e.rest)}`:''}</div></div><div class="row" style="gap:6px">${i>0?`<button class="pillbtn" data-up="${i}" aria-label="Move ${esc(e.name)} up">↑</button>`:''}<button class="pillbtn" data-rm="${i}" aria-label="Remove ${esc(e.name)}">✕</button></div></div>`).join('')
     :'<p class="sm muted">No exercises yet — add some below.</p>';};
   draw();
   $('#pdList').onclick=e=>{
@@ -1544,8 +1573,10 @@ function editDayModal(key){
     const r=e.target.closest('[data-rm]');if(r){day.ex.splice(+r.dataset.rm,1);draw();}};
   $('#pdAdd').onclick=()=>{const n=$('#pdName').value.trim();if(!n)return toast('Enter an exercise name');
     const mode=$('#pdMode').value;
-    day.ex.push({name:n,target:$('#pdTarget').value.trim()||(mode==='time'?'8 × 40s':'3 × 8–10'),type:$('#pdType').value,mode,rest:+$('#pdRest').value||(mode==='time'?30:undefined)});
-    $('#pdName').value='';$('#pdTarget').value='';$('#pdRest').value='';draw();};
+    const ne={name:n,target:$('#pdTarget').value.trim()||(mode==='time'?'8 × 40s':'3 × 8–10'),type:$('#pdType').value,mode,perSide:$('#pdSide').checked};
+    ne.rest=+$('#pdRest').value||(mode==='time'?30:defaultRest(ne));
+    day.ex.push(ne);
+    $('#pdName').value='';$('#pdTarget').value='';$('#pdRest').value='';$('#pdSide').checked=false;draw();};
   const del=$('#pdDelete');if(del)del.onclick=async()=>{
     if(!confirm('Delete this training day? Past logged sessions are kept.'))return;
     delete PROG.days[k];
@@ -1618,13 +1649,14 @@ async function startSession(dayKey,existing){
   if(draft&&draft.dayKey===dayKey){session=draft;toast('Resumed your unfinished session');}
   else session=existing||{id:uid(),date:todayStr(),dayKey,title:prog.title,notes:'',ts:Date.now(),
     exercises:prog.ex.map(e=>{const prev=lastMap[e.name];const n=prev?prev.length:parseInt(e.target)||3;
-      return{name:e.name,target:e.target,mode:e.mode||'reps',rest:e.rest,
+      return{name:e.name,target:e.target,mode:e.mode||'reps',rest:e.rest,perSide:!!e.perSide,
         sets:Array.from({length:n},(_,i)=>e.mode==='time'?{secs:''}:{weight:prev&&prev[i]?prev[i].weight:'',reps:''})};})};
   drawSession(session,lastMap,!existing);
 }
 function drawSession(session,lastMap,drafting){
   // sessions saved before modes existed: pull mode/rest from today's program
-  session.exercises.forEach(ex=>{const pe=progEx(ex.name);if(!ex.mode)ex.mode=pe?.mode||'reps';if(ex.rest==null&&pe)ex.rest=pe.rest;});
+  session.exercises.forEach(ex=>{const pe=progEx(ex.name);if(!ex.mode)ex.mode=pe?.mode||'reps';if(ex.rest==null&&pe)ex.rest=pe.rest;
+    if(ex.perSide==null)ex.perSide=pe?pe.perSide:UNILATERAL_RE.test(ex.name);});
   const phFor=(ex,si)=>{const prev=(lastMap&&lastMap[ex.name]||[])[si]||{};
     return ex.mode==='time'
       ?{secs:prev.secs||+((String(ex.target).match(/(\d+)\s*s/)||[])[1])||'',rest:prev.rest||ex.rest||''}
@@ -1639,9 +1671,9 @@ function drawSession(session,lastMap,drafting){
       else lastTxt=`Last: ${last.map(s=>`${s.weight||'–'}×${s.reps||'–'}`).join(', ')}`;
     }
     const adv=last?(timed?timedAdvice(ex,last):progressionAdvice(ex.name,ex.target,last)):null;
-    return `<div data-ex="${ei}"><div class="exhead"><span class="en">${esc(ex.name)}</span><span class="et">${ex.target?`target ${esc(ex.target)}`:''}${ex.rest?` · rest ${ex.rest}s`:''}</span></div>
+    return `<div data-ex="${ei}"><div class="exhead"><span class="en">${esc(ex.name)}</span><span class="et">${ex.target?`target ${esc(ex.target)}${ex.perSide?' per side':''}`:''}${ex.rest?` · rest ${restLabel(ex.rest)}`:''}</span></div>
       ${lastTxt?`<div class="lasthint">${esc(lastTxt)}${adv?` — <b>↑ ${esc(adv)}</b>`:''}</div>`:''}
-      <div class="setrow${timed?' time':''}" style="color:var(--muted);font-size:11px;font-weight:700"><span class="si">#</span>${timed?'<span>WORK S</span><span>REST S</span>':'<span>KG</span><span>REPS</span>'}<span></span></div>
+      <div class="setrow${timed?' time':''}" style="color:var(--muted);font-size:11px;font-weight:700"><span class="si">#</span>${timed?'<span>WORK S</span><span>REST S</span>':`<span>KG</span><span>REPS${ex.perSide?' / SIDE':''}</span>`}<span></span></div>
       <div class="sets">${ex.sets.map((s,si)=>setRow(ei,si,s,ex,phFor(ex,si))).join('')}</div>
       <button class="addset" data-addset="${ei}">+ ${timed?'interval':'set'}</button></div>`;
   }).join('');
@@ -1711,13 +1743,17 @@ function drawSession(session,lastMap,drafting){
     await idbPut('workouts',session);
     if(drafting)await idbDel('kv','woDraft');
     closeModal();buzz();toast('Session saved 💪');curDate=session.date;go('train');renderToday();};
-  if(drafting)saveDraft(); // a just-started session survives from second one
+  // NOTE: deliberately no saveDraft() here. Merely *opening* a day used to write a
+  // draft, so an accidental tap left a phantom "unfinished session" that nagged you
+  // and blocked starting another day. The draft is now created by the first real
+  // input (keystroke, tick, added set) — see saveDraftSoon.
 }
 function setRow(ei,si,s,ex,ph){
   const tick=`<button type="button" class="si${s.done?' on':''}" data-tickset aria-label="Mark set ${si+1} done (starts rest timer)">${si+1}</button>`;
   if(ex&&ex.mode==='time')return `<div class="setrow time">${tick}<input type="number" inputmode="numeric" placeholder="${ph&&ph.secs?ph.secs:'0'}" aria-label="Interval ${si+1}, work seconds" value="${s.secs??''}"><input type="number" inputmode="numeric" placeholder="${ph&&ph.rest?ph.rest:'0'}" aria-label="Interval ${si+1}, rest seconds" value="${s.rest??''}"><button class="del" data-delset aria-label="Remove interval ${si+1}">✕</button></div>`;
-  return `<div class="setrow">${tick}<input type="number" inputmode="decimal" placeholder="0" aria-label="Set ${si+1} weight, kg" value="${s.weight??''}"><input type="number" inputmode="numeric" placeholder="${ph&&ph.reps?ph.reps:'0'}" aria-label="Set ${si+1} reps" value="${s.reps??''}"><button class="del" data-delset aria-label="Remove set ${si+1}">✕</button></div>`;
+  return `<div class="setrow">${tick}<input type="number" inputmode="decimal" placeholder="0" aria-label="Set ${si+1} weight, kg" value="${s.weight??''}"><input type="number" inputmode="numeric" placeholder="${ph&&ph.reps?ph.reps:'0'}" aria-label="Set ${si+1} reps${ex&&ex.perSide?' per side':''}" value="${s.reps??''}"><button class="del" data-delset aria-label="Remove set ${si+1}">✕</button></div>`;
 }
+function restLabel(sec){return sec>=90?`${Math.floor(sec/60)}:${String(sec%60).padStart(2,'0')} min`:`${sec}s`;}
 
 let restInt=null;
 function startRest(sec){
@@ -1912,6 +1948,8 @@ document.addEventListener('click',async e=>{
       if(!v)return toast('Type a name');
       EQUIP[cat].push(v);}
     await saveEquip();toast('Added ✓');return;}
+  if(t.closest('[data-discarddraft]')){
+    if(confirm('Discard the unfinished session? Nothing you logged in it is kept.')){await idbDel('kv','woDraft');renderTrainStart();toast('Discarded');}return;}
   const sd=t.closest('[data-startday]');if(sd){startSession(sd.dataset.startday);return;}
   const ow=t.closest('[data-openwo]');if(ow){openWorkout(ow.dataset.openwo);return;}
   if(t.closest('#helpBtn')){go('plan');return;}

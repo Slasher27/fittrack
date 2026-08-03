@@ -134,7 +134,7 @@ v2 added the `water` store; migrations run in `onupgradeneeded`, whose
 | `log` | `id` | `date` | `{id, date:'YYYY-MM-DD', meal:'breakfast'|'lunch'|'snack'|'dinner', foodId, name, serving, servings, kcal, protein, carbs, fat, ts}` |
 | `measurements` | `id` | `date` | `{id, date, weight, waist, chest, arm, thigh, notes}` |
 | `photos` | `id` | `date` | `{id, date, category:'Front'|'Side'|'Back', note, blob:Blob, ts}` |
-| `workouts` | `id` | `date` | `{id, date, dayKey:'A'|'B'|'C', title, notes, ts, exercises:[{name, target, mode:'reps'|'time', rest?, sets:[{weight, reps, done?} \| {secs, rest, done?}]}]}` — `mode:'time'` = interval work logged as work/rest seconds per interval (e.g. skipping); the row's `rest` drives the rest timer |
+| `workouts` | `id` | `date` | `{id, date, dayKey:'A'|'B'|'C', title, notes, ts, exercises:[{name, target, mode:'reps'|'time', rest?, perSide?, sets:[{weight, reps, done?} \| {secs, rest, done?}]}]}` — `mode:'time'` = interval work logged as work/rest seconds per interval (e.g. skipping); the row's `rest` drives the rest timer. `perSide:true` means the logged reps are **per side** (single-leg RDL, lunges) — surfaced as "per side" in the header and `REPS / SIDE` on the column |
 | `water` | `id` | `date` | `{id, date, ml, ts}` — one row per +250/+500 tap; daily total is the sum (target `WATER_TARGET_ML` = 3000) |
 
 `kv` singletons:
@@ -174,6 +174,12 @@ so logging is a decimal multiplier (e.g. 180 g chicken = `1.8` servings of a
 `"100 g"` food). For countable foods it's `"1 egg"`, `"1 slice"`, `"1 scoop
 (30 g)"`. Helpers:
 - `scale(food, servings)` → `{kcal, protein, carbs, fat}`.
+- `servingUnit(serving)` → `{base, unit}` for weight/volume labels (`"100 g"` →
+  `{base:100, unit:'g'}`), else `null`. The match is **anchored**, so
+  `"1 scoop (30 g)"` stays a count. Weight foods are entered and displayed in
+  their own unit — you type `180` for 180 g, and the app divides by `base` to
+  get servings internally. `qtyLabel(serving, servings)` renders `"180 g"`
+  rather than `"1.8 × 100 g"`. Countable foods (`"1 egg"`) are unchanged.
 - `foodMap(list)` → `{id: food}` lookup.
 - `mealMacros(meal, fmap?)` → summed macros for a meal's items.
 
@@ -188,10 +194,13 @@ so logging is a decimal multiplier (e.g. 180 g chicken = `1.8` servings of a
   is **user data**: kv key `program` (`{days:{A:{title,ex:[{name,target,type,
   mode,rest}]}}, schedule:{Mon:'A',…}}`), loaded into the `PROG` global and
   edited in-app (Train → ✎ per day, + Add day). `mode:'reps'|'time'` picks the
-  set-row layout (kg × reps vs seconds) and `rest` the per-exercise rest-timer
-  seconds; `loadProgram()` migrates missing `mode`/`rest` **in-memory only** —
-  never idbPut from a migration, or a mere page load would out-stamp a newer
-  synced program (LWW). `type` (one of `EX_TYPES`) drives the
+  set-row layout (kg × reps vs seconds), `rest` the per-exercise rest-timer
+  seconds, and `perSide` marks unilateral work; `loadProgram()` migrates missing
+  `mode`/`rest`/`perSide` **in-memory only** — never idbPut from a migration, or
+  a mere page load would out-stamp a newer synced program (LWW). Missing `rest`
+  falls back to `defaultRest(ex)` (heavy compounds 150/120 s → isolation 60 s)
+  rather than the old flat 90 s; missing `perSide` is inferred from
+  `UNILATERAL_RE` against the exercise name. `type` (one of `EX_TYPES`) drives the
   Coach's progression advice. Equipment likewise: kv key `equipment` →
   `EQUIP` global, edited via Train → 🎒 My gym. Both kv keys sync across
   devices (`SYNCED_KV`); seeded only when absent — never overwrite user edits.
