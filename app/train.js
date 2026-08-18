@@ -1,13 +1,45 @@
 /* ============================ TRAIN ============================ */
 async function renderTrainStart(){
   const draft=(await idbGet('kv','woDraft'))?.v;
-  const resume=draft&&PROG.days[draft.dayKey]?`<div class="row" style="gap:8px;margin-bottom:8px"><button class="btn" style="flex:1;text-align:left" data-startday="${draft.dayKey}">⏵ Resume ${esc(draft.title.split('—')[0].trim())} — unfinished session</button><button class="pillbtn" data-discarddraft aria-label="Discard unfinished session" style="align-self:stretch">✕</button></div>`:'';
+  const workouts=await idbGetAll('workouts');
+  const today=todayStr(),abbr=DAY_ORDER[(parseD(today).getDay()+6)%7];
+  const todayKey=PROG.schedule[abbr];
+  const doneToday=workouts.some(w=>w.date===today&&doneSets((w.exercises||[]).flatMap(e=>e.sets||[])).length);
   const nd=Object.keys(PROG.days).length;
-  $('#dayBtns').innerHTML=resume+`<button class="entry planpick" data-planlib style="width:100%;text-align:left;margin-bottom:8px"><div><div class="xs muted" style="letter-spacing:.06em;text-transform:uppercase">Active plan</div><div class="n">${esc(PROG.name||'My program')}</div></div><span class="pillbtn">${PLANS.length>1?PLANS.length+' plans ›':'Plans ›'}</span></button>`
+  const resume=draft&&PROG.days[draft.dayKey]?`<div class="row" style="gap:8px;margin-bottom:10px"><button class="btn" style="flex:1;text-align:left" data-startday="${draft.dayKey}">⏵ Resume ${esc(draft.title.split('—')[0].trim())} — unfinished session</button><button class="pillbtn" data-discarddraft aria-label="Discard unfinished session">✕</button></div>`:'';
+  // today's hero: the scheduled day (or "rest day")
+  let hero='';
+  if(!resume&&nd){
+    if(todayKey&&PROG.days[todayKey]&&!doneToday){const d=PROG.days[todayKey];
+      hero=`<div class="card hero" style="margin-bottom:12px"><div class="xs muted" style="letter-spacing:.06em;text-transform:uppercase">Today · ${abbr}</div>
+        <div class="row between" style="gap:10px;margin-top:2px"><div><div class="hero-t">${esc(d.title.split('—')[0].trim())}</div><div class="sm muted">${esc((d.title.split('—')[1]||'').trim())} · ${d.ex.length} exercises</div></div><button class="btn" data-startday="${todayKey}">Start</button></div>
+        <div class="xs muted" style="margin-top:8px">${d.ex.map(e=>esc(e.name)).join(' · ')}</div></div>`;}
+    else if(doneToday)hero=`<div class="card" style="margin-bottom:12px"><b>✓ Trained today</b><div class="sm muted">Nice. Rest, eat, hydrate — or start another day below.</div></div>`;
+    else hero=`<div class="card" style="margin-bottom:12px"><b>Rest day</b><div class="sm muted">Nothing scheduled for ${abbr}. Start any day below if you want to train.</div></div>`;
+  }
+  const days=Object.entries(PROG.days).map(([k,v])=>
+    `<div class="row" style="gap:8px"><button class="btn sec" style="flex:1;text-align:left" data-startday="${k}">▶︎ ${esc(v.title)}</button><button class="pillbtn" data-editday="${k}" aria-label="Edit ${esc(v.title)}" style="align-self:stretch">✎</button></div>`).join('');
+  $('#dayBtns').innerHTML=resume+hero
+    +`<button class="entry planpick" data-planlib style="width:100%;text-align:left;margin-bottom:8px"><div><div class="xs muted" style="letter-spacing:.06em;text-transform:uppercase">Active plan</div><div class="n">${esc(PROG.name||'My program')}</div></div><span class="pillbtn">${PLANS.length>1?PLANS.length+' plans ›':'Plans ›'}</span></button>`
     +(nd?'':`<p class="sm muted">This plan has no training days yet — add one below.</p>`)
-    +Object.entries(PROG.days).map(([k,v])=>
-    `<div class="row" style="gap:8px"><button class="btn sec" style="flex:1;text-align:left" data-startday="${k}">▶︎ ${esc(v.title)}</button><button class="pillbtn" data-editday="${k}" aria-label="Edit ${esc(v.title)}" style="align-self:stretch">✎</button></div>`).join('')
-    +`<div class="btnrow" style="margin-top:6px"><button class="btn ghost sm" data-addday style="width:100%">+ Add day</button><button class="btn ghost sm" id="gymBtn" style="width:100%">🎒 My gym</button><button class="btn ghost sm" id="libBtn" style="width:100%">📚 Exercises</button></div>`;
+    +days
+    +`<div class="btnrow" style="margin-top:6px;grid-template-columns:1fr 1fr 1fr"><button class="btn ghost sm" data-addday style="width:100%">+ Add day</button><button class="btn ghost sm" id="gymBtn" style="width:100%">🎒 My gym</button><button class="btn ghost sm" id="libBtn" style="width:100%">📚 Exercises</button></div>`;
+  renderWeekCard(workouts);
+}
+/* This week: sessions vs plan, hard sets by region, tonnage; last-4-weeks by muscle behind a disclosure. */
+function renderWeekCard(workouts){
+  const el=$('#trainWeek');if(!el)return;
+  const weeks=weeklyVolume(workouts,4);const wk=weeks[weeks.length-1];
+  const planned=plannedPerWeek();
+  const REG=[['lower','Lower'],['upper-push','Upper push'],['upper-pull','Upper pull'],['core','Core'],['conditioning','Conditioning'],['mobility','Mobility']];
+  const maxR=Math.max(1,...REG.map(([k])=>wk.byRegion[k]||0));
+  const bars=REG.filter(([k])=>wk.byRegion[k]||weeks.some(w=>w.byRegion[k])).map(([k,l])=>`<div class="vrow"><span class="vl">${l}</span><span class="vbar"><i style="width:${Math.round(100*(wk.byRegion[k]||0)/maxR)}%"></i></span><span class="vn">${wk.byRegion[k]||0}</span></div>`).join('');
+  const muscles=[...new Set(weeks.flatMap(w=>Object.keys(w.byMuscle)))].sort((a,b)=>(weeks[3].byMuscle[b]||0)-(weeks[3].byMuscle[a]||0));
+  const table=muscles.length?`<table class="vtable"><thead><tr><th>Sets / week</th>${weeks.map(w=>`<th>${niceDate(w.start).replace('Today','This wk')}</th>`).join('')}</tr></thead><tbody>${muscles.map(m=>`<tr><td>${m}</td>${weeks.map(w=>`<td class="${(w.byMuscle[m]||0)>=10?'good':''}">${w.byMuscle[m]||0}</td>`).join('')}</tr>`).join('')}</tbody></table><p class="xs muted" style="margin:6px 0 0">The plan's target is 10–15 hard sets per muscle per week (highlighted when reached).</p>`:'';
+  el.innerHTML=`<div class="card"><div class="row between"><b>This week</b><span class="sm muted">${wk.sessions}${planned?` of ${planned}`:''} session${wk.sessions===1&&!planned?'':'s'} · ${wk.sets} sets · ${fmtKg(wk.tonnage)}${wk.prs?` · ${wk.prs} PB${wk.prs>1?'s':''}`:''}</span></div>
+    ${bars?`<div style="margin-top:8px">${bars}</div>`:'<p class="sm muted" style="margin:6px 0 0">No sets logged this week yet.</p>'}
+    ${table?`<details style="margin-top:8px"><summary class="sm" style="cursor:pointer">By muscle · last 4 weeks</summary><div style="overflow-x:auto;margin-top:6px">${table}</div></details>`:''}
+  </div>`;
 }
 function nextDayKey(){for(const c of 'ABCDEFGH')if(!PROG.days[c])return c;return 'D'+(Object.keys(PROG.days).length+1);}
 async function saveProgram(){await idbPut('plans',PROG);}
@@ -146,8 +178,8 @@ async function saveEquip(){
 }
 async function renderWorkoutHistory(){
   const list=(await idbGetAll('workouts')).sort((a,b)=>a.date<b.date?1:(a.date>b.date?-1:b.ts-a.ts));
-  $('#workoutHistory').innerHTML=list.length?list.map(w=>{const sets=w.exercises.reduce((n,e)=>n+e.sets.filter(s=>s.reps||s.secs||s.done).length,0);const vol=w.exercises.reduce((v,e)=>v+e.sets.reduce((x,s)=>x+((+s.weight||0)*(+s.reps||0)),0),0);
-    return `<div class="card sessioncard" role="button" tabindex="0" data-openwo="${w.id}"><div class="row between"><div><b>${esc(w.title.split('—')[0].trim())}</b><div class="sm muted">${niceDate(w.date)} · ${sets} sets · ${rnd(vol)} kg volume</div></div><span class="pillbtn">View ›</span></div></div>`;}).join(''):`<div class="empty"><span class="ic">🏋️</span>No sessions logged yet.</div>`;
+  $('#workoutHistory').innerHTML=list.length?list.slice(0,60).map(w=>{const s=sessionSummary(w);const prs=(w.prs||[]).length;
+    return `<div class="card sessioncard" role="button" tabindex="0" data-openwo="${w.id}"><div class="row between"><div><b>${esc(w.title.split('—')[0].trim())}</b>${prs?` <span class="badge">🏆 ${prs} PB${prs>1?'s':''}</span>`:''}<div class="sm muted">${niceDate(w.date)} · ${s.sets} sets${s.tonnage?` · ${fmtKg(s.tonnage)}`:''}</div></div><span class="pillbtn">View ›</span></div></div>`;}).join(''):`<div class="empty"><span class="ic">🏋️</span>No sessions logged yet.</div>`;
 }
 async function startSession(dayKey,existing){
   const prog=PROG.days[dayKey];if(!prog)return toast('That training day no longer exists');
@@ -170,131 +202,5 @@ async function startSession(dayKey,existing){
         sets:Array.from({length:n},(_,i)=>e.mode==='time'||e.mode==='rounds'?{secs:''}:{weight:prev&&prev[i]?prev[i].weight:'',reps:''})};})};
   drawSession(session,lastMap,!existing);
 }
-function drawSession(session,lastMap,drafting){wakeOn();
-  // sessions saved before modes existed: pull mode/rest from today's program
-  session.exercises.forEach(ex=>{const pe=progEx(ex.name);if(!ex.mode)ex.mode=pe?.mode||'reps';if(ex.rest==null&&pe)ex.rest=pe.rest;
-    if(ex.perSide==null)ex.perSide=pe?pe.perSide:isUnilateral(ex.name);
-    if(!ex.items&&pe&&pe.items)ex.items=pe.items;if(pe&&pe.mode==='rounds'&&ex.mode!=='rounds'&&!ex.sets.some(s=>s.weight||s.reps))ex.mode='rounds';});
-  const phFor=(ex,si)=>{const prev=(lastMap&&lastMap[ex.name]||[])[si]||{};
-    if(ex.mode==='rounds')return{secs:prev.secs||''};
-    return ex.mode==='time'
-      ?{secs:prev.secs||+((String(ex.target).match(/(\d+)\s*s/)||[])[1])||'',rest:prev.rest||ex.rest||''}
-      :{reps:prev.reps||''};};
-  const bodyHtml=()=>session.exercises.map((ex,ei)=>{
-    const timed=ex.mode==='time',rounds=ex.mode==='rounds';
-    const last=lastMap&&lastMap[ex.name];
-    let lastTxt='';
-    if(last&&last.some(s=>s.weight||s.reps||s.secs)){
-      if(rounds){const done=last.filter(s=>s.secs||s.done);lastTxt=`Last: ${done.length} round${done.length===1?'':'s'}${done.some(s=>s.secs)?` (${done.map(s=>s.secs?s.secs+'s':'–').join(', ')})`:''}`;}
-      else if(timed){const w=[...new Set(last.map(s=>s.secs||'–'))],r=[...new Set(last.map(s=>s.rest||''))].filter(Boolean);
-        lastTxt=w.length===1&&r.length<=1?`Last: ${last.length} × ${w[0]}s work${r.length?` / ${r[0]}s rest`:''}`:`Last: ${last.map(s=>`${s.secs||'–'}s${s.rest?`/${s.rest}r`:''}`).join(', ')}`;}
-      else lastTxt=`Last: ${last.map(s=>`${s.weight||'–'}×${s.reps||'–'}`).join(', ')}`;
-    }
-    const adv=last&&!rounds?(timed?timedAdvice(ex,last):progressionAdvice(ex.name,ex.target,last)):null;
-    return `<div data-ex="${ei}"><div class="exhead"><span class="en">${esc(ex.name)}</span><span class="et">${ex.target?`target ${esc(exTargetText(ex))}`:''}${ex.rest?` · rest ${restLabel(ex.rest)}`:''}</span></div>
-      ${rounds&&ex.items&&ex.items.length?`<div class="lasthint">Each round: ${esc(itemsLabel(ex.items))}</div>`:''}
-      ${lastTxt?`<div class="lasthint">${esc(lastTxt)}${adv?` — <b>↑ ${esc(adv)}</b>`:''}</div>`:''}
-      <div class="setrow${timed?' time':rounds?' rounds':''}" style="color:var(--muted);font-size:11px;font-weight:700"><span class="si">#</span>${timed?'<span>WORK S</span><span>REST S</span>':rounds?'<span>ROUND TIME S (optional)</span>':`<span>KG</span><span>REPS${ex.perSide?' / '+sideWord(ex.name).toUpperCase():''}</span>`}<span></span></div>
-      <div class="sets">${ex.sets.map((s,si)=>setRow(ei,si,s,ex,phFor(ex,si))).join('')}</div>
-      <button class="addset" data-addset="${ei}">+ ${timed?'interval':rounds?'round':'set'}</button></div>`;
-  }).join('');
-  openModal(`<div class="mh"><h3>${esc(session.title.split('—')[0].trim())}</h3><button class="x" onclick="closeModal()">✕</button></div>
-    <div class="sm muted" style="margin-bottom:4px">${esc(session.title)} · tick a set when done — it fills in "same as last time", starts the rest, and lights up when you beat last session${drafting?' · progress auto-saves':''}</div>
-    <div id="restTimer" class="resttimer hidden" role="timer"></div>
-    <label class="fl">Date</label><input id="woDate" type="date" value="${session.date}">
-    <div id="woBody">${bodyHtml()}</div>
-    <div class="row" style="gap:6px;margin-top:10px"><input id="woNewEx" placeholder="Add an exercise (swap / extra)" style="flex:1"><button class="btn sm sec" id="woAddEx" style="flex:none">Add</button></div>
-    <label class="fl">Session notes</label><textarea id="woNotes" placeholder="Energy, niggles, PBs…">${esc(session.notes||'')}</textarea>
-    <button class="btn" style="margin-top:14px" id="woSave">${drafting?'Finish session':'Save changes'}</button>`);
-  const root=$('#woBody');
-  const collect=()=>{ // DOM → session (single source of truth for save, draft, and redraws)
-    session.date=$('#woDate').value;session.notes=$('#woNotes').value.trim();
-    session.exercises.forEach((ex,ei)=>{const rows=$$(`[data-ex="${ei}"] .sets .setrow`,root);
-      ex.sets=rows.map(r=>{const ins=r.querySelectorAll('input');const done=r.querySelector('[data-tickset]').classList.contains('on');
-        return ex.mode==='time'?{secs:ins[0].value,rest:ins[1].value,done}:ex.mode==='rounds'?{secs:ins[0].value,done}:{weight:ins[0].value,reps:ins[1].value,done};});});
-  };
-  let draftT=null;
-  const saveDraft=async()=>{if(!drafting||!document.body.contains(root))return;collect();await idbPut('kv',{k:'woDraft',v:session});}; // the sheet may already be closed (Finish/tap-outside) when the debounce fires
-  const saveDraftSoon=()=>{if(!drafting)return;clearTimeout(draftT);draftT=setTimeout(saveDraft,400);};
-  root.addEventListener('click',e=>{
-    const a=e.target.closest('[data-addset]');
-    if(a){const ei=+a.dataset.addset;const ex=session.exercises[ei];const setsDiv=root.querySelector(`[data-ex="${ei}"] .sets`);
-      const si=setsDiv.children.length;
-      setsDiv.insertAdjacentHTML('beforeend',setRow(ei,si,ex.mode==='time'?{secs:'',rest:''}:ex.mode==='rounds'?{secs:''}:{weight:'',reps:''},ex,phFor(ex,si)));
-      saveDraftSoon();return;}
-    const tk=e.target.closest('[data-tickset]');
-    if(tk){const on=tk.classList.toggle('on');
-      if(on){ // tick = "done as planned": materialize the greyed-in suggestion, then rest
-        const row=tk.closest('.setrow');
-        row.querySelectorAll('input').forEach(inp=>{if(!inp.value&&+inp.placeholder)inp.value=inp.placeholder;});
-        const ex=session.exercises[+tk.closest('[data-ex]').dataset.ex];
-        // timed exercises rest for THIS interval's rest value (so cutting 20 → 15 s takes effect immediately)
-        const rsec=ex.mode==='time'?(+row.querySelectorAll('input')[1].value||ex.rest||30):ex.mode==='rounds'?(ex.rest||45):(ex.rest||90);
-        buzz();startRest(rsec);}
-      saveDraftSoon();return;}
-    const d=e.target.closest('[data-delset]');if(d){d.closest('.setrow').remove();saveDraftSoon();}});
-  // beat-last-session highlight: volt row when this set beats last time's same set
-  root.addEventListener('input',e=>{
-    if(!e.target.matches('.setrow input'))return;
-    saveDraftSoon();
-    const exEl=e.target.closest('[data-ex]');if(!exEl)return;
-    const row=e.target.closest('.setrow');const sets=row.parentElement;if(!sets.classList.contains('sets'))return;
-    const si=[...sets.children].indexOf(row);
-    const ex=session.exercises[+exEl.dataset.ex];
-    const prev=(lastMap&&lastMap[ex.name]||[])[si];
-    const ins=row.querySelectorAll('input');
-    if(ex.mode==='time'){const sv=+ins[0].value||0,rv=+ins[1].value||0;
-      // beat = more work, or same work on less rest
-      row.classList.toggle('beat',!!(prev&&sv&&(sv>+(prev.secs||0)||(sv===+(prev.secs||0)&&rv&&+(prev.rest||0)&&rv<+prev.rest))));return;}
-    const w=+ins[0].value||0,r=+ins[1].value||0;
-    row.classList.toggle('beat',!!(prev&&w&&r&&(w>+prev.weight||(w===+prev.weight&&r>+prev.reps))));
-  });
-  $('#woDate').addEventListener('change',saveDraftSoon);
-  $('#woNotes').addEventListener('input',saveDraftSoon);
-  $('#woAddEx').onclick=()=>{
-    const name=$('#woNewEx').value.trim();if(!name)return;
-    collect();
-    const pe=progEx(name); // known exercise (e.g. from another day) brings its target/mode/rest along
-    session.exercises.push({name,target:pe?.target||'',tgt:pe?.tgt,items:pe?.items,mode:pe?.mode||'reps',rest:pe?.rest,perSide:pe?pe.perSide:isUnilateral(name),
-      sets:[pe?.mode==='time'?{secs:'',rest:''}:pe?.mode==='rounds'?{secs:''}:{weight:'',reps:''}]});
-    root.innerHTML=bodyHtml();
-    saveDraftSoon();toast(`${name} added to this session`);};
-  $('#woSave').onclick=async()=>{
-    collect();
-    await idbPut('workouts',session);
-    if(drafting)await idbDel('kv','woDraft');
-    closeModal();buzz();toast('Session saved 💪');curDate=session.date;go('train');renderToday();};
-  // NOTE: deliberately no saveDraft() here. Merely *opening* a day used to write a
-  // draft, so an accidental tap left a phantom "unfinished session" that nagged you
-  // and blocked starting another day. The draft is now created by the first real
-  // input (keystroke, tick, added set) — see saveDraftSoon.
-}
-function setRow(ei,si,s,ex,ph){
-  const tick=`<button type="button" class="si${s.done?' on':''}" data-tickset aria-label="Mark set ${si+1} done (starts rest timer)">${si+1}</button>`;
-  if(ex&&ex.mode==='rounds')return `<div class="setrow rounds">${tick}<input type="number" inputmode="numeric" placeholder="${ph&&ph.secs?ph.secs:'time s'}" aria-label="Round ${si+1} time, seconds (optional)" value="${s.secs??''}"><button class="del" data-delset aria-label="Remove round ${si+1}">✕</button></div>`;
-  if(ex&&ex.mode==='time')return `<div class="setrow time">${tick}<input type="number" inputmode="numeric" placeholder="${ph&&ph.secs?ph.secs:'0'}" aria-label="Interval ${si+1}, work seconds" value="${s.secs??''}"><input type="number" inputmode="numeric" placeholder="${ph&&ph.rest?ph.rest:'0'}" aria-label="Interval ${si+1}, rest seconds" value="${s.rest??''}"><button class="del" data-delset aria-label="Remove interval ${si+1}">✕</button></div>`;
-  return `<div class="setrow">${tick}<input type="number" inputmode="decimal" placeholder="0" aria-label="Set ${si+1} weight, kg" value="${s.weight??''}"><input type="number" inputmode="numeric" placeholder="${ph&&ph.reps?ph.reps:'0'}" aria-label="Set ${si+1} reps${ex&&ex.perSide?' per side':''}" value="${s.reps??''}"><button class="del" data-delset aria-label="Remove set ${si+1}">✕</button></div>`;
-}
-// Screen wake lock: keep the phone awake while a session is open in the logger.
-// The OS releases the lock whenever the tab is hidden, so re-acquire on return.
-let wakeLock=null,wantWake=false;
-async function wakeOn(){wantWake=true;if(!('wakeLock'in navigator)||wakeLock)return;try{wakeLock=await navigator.wakeLock.request('screen');wakeLock.addEventListener('release',()=>{wakeLock=null;});}catch(e){wakeLock=null;}}
-function wakeOff(){wantWake=false;try{if(wakeLock)wakeLock.release();}catch(e){}wakeLock=null;}
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&wantWake)wakeOn();});
-function restLabel(sec){return sec>=90?`${Math.floor(sec/60)}:${String(sec%60).padStart(2,'0')} min`:`${sec}s`;}
-
-let restInt=null;
-function startRest(sec){
-  clearInterval(restInt);const el=$('#restTimer');if(!el)return;
-  const end=Date.now()+sec*1000; // timestamp-based: survives the phone freezing timers while locked
-  const paint=()=>{
-    const t=Math.max(0,Math.round((end-Date.now())/1000));
-    if(t<=0){clearInterval(restInt);el.classList.add('hidden');buzz();toast('Rest done — next set 💪');return;}
-    el.textContent=`⏱ Rest ${Math.floor(t/60)}:${String(t%60).padStart(2,'0')} — tap to skip`;
-  };
-  el.classList.remove('hidden');paint();
-  restInt=setInterval(paint,500);
-  el.onclick=()=>{clearInterval(restInt);el.classList.add('hidden');};
-}
-async function openWorkout(id){const w=await idbGet('workouts',id);const all=(await idbGetAll('workouts')).filter(x=>x.dayKey===w.dayKey&&x.date<w.date).sort((a,b)=>a.date<b.date?1:-1);const lastMap={};if(all[0])all[0].exercises.forEach(e=>lastMap[e.name]=e.sets);drawSession(w,lastMap);}
+/* The logger, rest timer, wake lock and exercise history live in app/session.js (v3 stage 3). */
 

@@ -1,5 +1,9 @@
 /* ============================ Navigation ============================ */
 function go(view){
+  // leaving the logger (peeking at exercise history doesn't count): stop the rest timer, release the wake lock — the draft is already saved
+  if((curView==='session'&&view!=='session'&&view!=='exhist')||(curView==='exhist'&&exhistFrom==='session'&&view!=='session'&&view!=='exhist'))exitSession();
+  if(view==='session'){document.body.classList.add('session-mode');wakeOn();}
+  if(view==='exhist')exhistFrom=curView==='exhist'?exhistFrom:curView;
   curView=view;
   $$('.view').forEach(v=>v.classList.add('hidden'));
   const v=$('#view-'+view);v.classList.remove('hidden');
@@ -15,6 +19,7 @@ function go(view){
   if(view==='plan')renderPlan();
   if(view==='gym')renderGym();
   if(view==='library')renderLibrary();
+  if(view==='exhist')renderExHist();
 }
 
 /* ---------- global events ---------- */
@@ -60,6 +65,9 @@ document.addEventListener('click',async e=>{
   if(t.closest('#gymBack')){go('train');return;}
   if(t.closest('#libBtn')){go('library');return;}
   if(t.closest('#libBack')){go('train');return;}
+  if(t.closest('#sesBack')){go('train');return;}
+  if(t.closest('#exhBack')){if(exhistFrom==='session'&&SES){go('session');}else go(exhistFrom&&exhistFrom!=='exhist'?exhistFrom:'train');return;}
+  const xh=t.closest('[data-exhist]');if(xh){renderExHist(xh.dataset.exhist);go('exhist');return;}
   const lp=t.closest('[data-libpat]');if(lp){libPattern=lp.dataset.libpat;renderLibrary();return;}
   const lg=t.closest('[data-libgo]');if(lg){libOpen=lg.dataset.libgo;libQ='';libPattern='';renderLibrary();const el=document.querySelector(`[data-libex="${CSS.escape(libOpen)}"]`);if(el)el.scrollIntoView({block:'center'});return;}
   const lx=t.closest('[data-libex]');if(lx){libOpen=libOpen===lx.dataset.libex?null:lx.dataset.libex;renderLibrary();return;}

@@ -62,6 +62,8 @@ fittrack/
 │   ├── targets.js      ← structured targets: parseTarget / targetLabel / exTargetText / normalizeTarget / circuits.
 │   ├── exercises.js    ← EX_SEED_MORE — the bulk of the exercise catalog (318 total with seed.js), with cues.
 │   ├── library.js      ← Exercise library view: search/filter, detail, equipment-aware alternatives, history.
+│   ├── analytics.js    ← derived training analytics: exerciseHistory/Bests, e1RM (Epley), PR detection, sessionSummary, weeklyVolume.
+│   ├── session.js      ← full-screen session logger (#view-session), rest timer, wake lock, exercise-history screen (#view-exhist).
 │   ├── util.js seed.js plan.js settings.js qr.js model.js coach.js today.js
 │   │   food.js body.js train.js settingsView.js events.js
 │   │                   ← v1 views (classic scripts, global scope; load order = index.html order).
@@ -128,11 +130,16 @@ to the gate. **Never advise "Clear site data"** as a cache fix — see V2-SPEC �
 ## 4. Architecture of `index.html`
 
 ### 4.1 Views & navigation
-Six `<div class="view">` containers toggled by CSS `.hidden`: five tabs
+`<div class="view">` containers toggled by CSS `.hidden`: five tabs
 (`#view-today`, `#view-food`, `#view-body`, `#view-photos`, `#view-train`)
 driven by the fixed bottom `.nav` (`data-nav="<view>"` buttons), plus
-`#view-plan` (the 📖 Plan/help screen, opened via the header `#helpBtn`, not
-in the nav).
+non-nav full-screen views: `#view-plan` (📖 Plan/help via `#helpBtn`),
+`#view-gym` (My gym), `#view-library` (exercise library), **`#view-session`
+(the workout logger — a view, not a modal; `body.session-mode` hides the nav)**,
+`#view-exhist` (per-exercise history; `exhistFrom` remembers where to go back
+to, and peeking at it mid-session keeps the rest timer/wake lock alive), and
+`#view-auth` (sign-in gate). **v3 rule: anything you *do* is a full screen;
+modals are for confirmations only.**
 
 **`#view-plan` / AI assistant:** the user's original coaching document lives
 in-app as `PLAN_SECTIONS` (8 `<details>` accordions). The Ask box calls the
@@ -277,8 +284,19 @@ so logging is a decimal multiplier (e.g. 180 g chicken = `1.8` servings of a
   (canvas line chart with a dashed goal line), and the measurement history list.
 - `renderPhotos()` — grid of photo thumbnails from stored blobs
   (`URL.createObjectURL`).
-- `renderTrainStart()` + `renderWorkoutHistory()` — active-plan row (→ plan
-  library), the day start buttons and past-session cards.
+- `renderTrainStart()` + `renderWorkoutHistory()` — today's hero (scheduled
+  day → Start / trained ✓ / rest day), draft resume, active-plan row (→ plan
+  library), day buttons, `renderWeekCard()` (sessions vs plan, hard sets by
+  region, tonnage, PBs; by-muscle × last-4-weeks table behind `<details>`),
+  history cards with 🏆 PB badges. Session logger (`app/session.js`): every
+  exercise block shows the target (with per leg/arm), rest, "Last: …" (done
+  sets only) and "Best: … · e1RM …" from `exerciseBests()`, the catalog cue on
+  first exposure, rows per metric (kg × reps · work/rest s · circuit rounds),
+  live beat-last + **PB detection** (`setPR()` against pre-session bests →
+  `.setrow.pr` + a PB line), tap-through to `renderExHist(name)` (KPIs, e1RM
+  chart via `drawSimpleLine`, session list). Finish stores `session.prs`
+  (`sessionPRs()`) and toasts them. A circuit round counts each item as a
+  hard set in rollups (`sessionSummary`).
 - `renderLibrary()` (`app/library.js`, `#view-library`) — the exercise library:
   search, pattern chips, "only what my gym can do" (`hasEquip()` maps catalog
   equipment tokens onto `EQUIP`), detail with cues/muscles/kit/history and
@@ -290,9 +308,9 @@ All modals use **`openModal(html)`** (injects a bottom-sheet into `#modalRoot`,
 tap-outside closes) and **`closeModal()`**. Key ones: `logFoodModal(foodId)`,
 `logMealModal(mealId)` (shows the itemised ingredient breakdown + logs the whole
 meal), `addFoodModal()`, `buildMealModal()`, `addMeasureModal()`,
-`addPhotoModal()` / `viewPhotoModal(id)`, `drawSession(session, lastMap)` (the
-workout logger, with per-set weight×reps inputs pre-filled from the last
-session of that day), and `settingsModal()`.
+`addPhotoModal()` / `viewPhotoModal(id)`, `settingsModal()`, `editDayModal()`, `planLibraryModal()`. The workout
+logger is **not** a modal any more: `drawSession(session, lastMap, drafting)`
+(`app/session.js`) renders into `#view-session` and calls `go('session')`.
 
 ### 4.6 Events
 There is **one delegated `document` click handler** near the bottom of the
