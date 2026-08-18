@@ -1,21 +1,41 @@
--- FitTrack sync schema. Run this once in Supabase: SQL Editor → New query → paste → Run.
--- One generic table holds every synced record (foods, meals, log, measurements, workouts).
+-- FitTrack sync schema — v2 (2026-08-18): one row set per user, protected by row-level security.
+-- Run in Supabase: SQL Editor → New query → paste → Run. Safe to run on a fresh project AND
+-- on a project that already has the v1 single-user `records` table (it upgrades in place:
+-- existing rows are handed to the first account ever created — the owner).
 
 create table if not exists public.records (
-  store   text   not null,
-  id      text   not null,
+  user_id uuid    not null default auth.uid(),
+  store   text    not null,
+  id      text    not null,
   data    jsonb,
-  up      bigint not null,          -- client timestamp (ms); last write wins
+  up      bigint  not null,          -- client timestamp (ms); last write wins
   deleted boolean not null default false,
-  primary key (store, id)
+  primary key (user_id, store, id)
 );
 
-create index if not exists records_up_idx on public.records (up);
+-- v1 → v2 upgrade (only runs when the old table has no user_id column)
+do $$
+begin
+  if not exists (select 1 from information_schema.columns
+                 where table_schema = 'public' and table_name = 'records' and column_name = 'user_id') then
+    alter table public.records add column user_id uuid;
+    update public.records
+       set user_id = (select id from auth.users order by created_at asc limit 1)
+     where user_id is null;
+    alter table public.records alter column user_id set not null;
+    alter table public.records alter column user_id set default auth.uid();
+    alter table public.records drop constraint if exists records_pkey;
+    alter table public.records add primary key (user_id, store, id);
+  end if;
+end $$;
 
--- Only signed-in users can touch the data (this is a single-user project:
--- the only account is yours, created in Authentication → Users).
+create index if not exists records_user_up_idx on public.records (user_id, up);
+
+-- Every signed-in user sees and writes only their own rows.
 alter table public.records enable row level security;
-
-drop policy if exists "authenticated full access" on public.records;
-create policy "authenticated full access" on public.records
-  for all to authenticated using (true) with check (true);
+drop policy if exists "authenticated full access" on public.records;   -- v1 policy
+drop policy if exists "own rows" on public.records;
+create policy "own rows" on public.records
+  for all to authenticated
+  using (user_id = auth.uid())
+  with check (user_id = auth.uid());

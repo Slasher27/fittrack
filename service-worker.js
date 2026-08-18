@@ -1,9 +1,30 @@
 /* FitTrack service worker — offline app shell */
-const CACHE = 'fittrack-v14';
+const CACHE = 'fittrack-v16';
 const ASSETS = [
   './',
   './index.html',
   './styles.css',
+  './app/config.js',
+  './app/db.js',
+  './app/auth.js',
+  './app/sync.js',
+  './app/main.js',
+  './app/util.js',
+  './app/targets.js',
+  './app/exercises.js',
+  './app/seed.js',
+  './app/plan.js',
+  './app/settings.js',
+  './app/qr.js',
+  './app/model.js',
+  './app/coach.js',
+  './app/today.js',
+  './app/food.js',
+  './app/body.js',
+  './app/train.js',
+  './app/library.js',
+  './app/settingsView.js',
+  './app/events.js',
   './fonts/BarlowCondensed-600.woff2',
   './fonts/BarlowCondensed-700.woff2',
   './manifest.json',
@@ -52,13 +73,16 @@ async function dailyNudge() {
     const today = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
     const abbr = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()];
     const hour = d.getHours();
-    const prog = (await get('kv', 'program')) || {};
-    const dayKey = prog.v && prog.v.schedule ? prog.v.schedule[abbr] : null;
-    if (dayKey && prog.v.days[dayKey] && hour >= 15) {
+    // active plan (v3 `plans` store) with a fallback to the legacy kv `program`
+    let plan = null;
+    try { const act = await get('kv', 'activePlan'); if (act && act.v) plan = await get('plans', act.v); } catch (e) {}
+    if (!plan) { const prog = (await get('kv', 'program')) || {}; plan = prog.v || null; }
+    const dayKey = plan && plan.schedule ? plan.schedule[abbr] : null;
+    if (dayKey && plan.days && plan.days[dayKey] && hour >= 15) {
       const done = await byDate('workouts', today);
       if (!done.length) {
         await self.registration.showNotification('🏋️ Training day', {
-          body: (prog.v.days[dayKey].title || 'Workout') + ' is on the plan today — sets are prefilled from last time.',
+          body: (plan.days[dayKey].title || 'Workout') + ' is on the plan today — sets are prefilled from last time.',
           tag: 'fittrack-train', icon: './icon-192.png', badge: './icon-192.png',
         });
         return;

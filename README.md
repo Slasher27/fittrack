@@ -44,7 +44,7 @@ This gives you a real installable app with its own web address, no account setup
 ## Important notes
 
 - **It must be opened from a web address (https), not a file**, for offline install and photo storage to work. That's why we host it — a plain double-click of `index.html` won't install as an app.
-- **Your data lives on the one device/browser you use.** It is private and offline, but it is *not* synced between devices and is *not* in the cloud. If you clear your browser data or lose the phone, the data goes with it.
+- **Your data follows your account.** You sign in once per device (email + password); everything you log syncs to your account in the background and is restored on any device you sign in on. The app still works fully offline — sync catches up when you're back online. Progress photos are the one thing that currently stays on the device. Setup for whoever deploys the app: see `SETUP-SYNC.md`.
 - **Back up regularly.** In ⚙️ Settings tap **Backup data** to download a file (includes your photos). Keep it somewhere safe. **Restore** re-imports it — handy when moving to a new phone.
 - Use the **same browser** each time (e.g. always Safari on iPhone). Data is per-browser.
 

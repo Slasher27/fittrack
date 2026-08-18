@@ -19,24 +19,32 @@ protein target).
 - **Zero dependencies, no build step.** Everything is hand-written vanilla
   HTML/CSS/JS. There is no npm, no bundler, no framework, no transpile step.
   You edit the source files and they run as-is.
-- **Local-first.** All user data lives in the browser's **IndexedDB** and every
-  feature works fully offline. Three *optional, opt-in* network integrations
-  exist (all degrade gracefully offline): **Supabase cloud sync** (multi-device
-  data; see `SETUP-SYNC.md` and §4.2 — always write through `idbPut`/`idbDel`
-  so records get sync stamps), the **AI assistant** (Anthropic API, key in
-  Settings), and **online food search** (Open Food Facts, no key — runs only
-  when the user taps "Search online" in the Food tab; imports become custom
-  foods with per-100 g macros, so they sync and work offline afterwards). Never
-  add a network dependency to a core flow.
+- **Local-first, account-backed (v3, 2026-08-18).** All user data lives in the
+  browser's **IndexedDB** and every logging/training feature works fully
+  offline. Users **sign in** (Supabase Auth, email + password — see
+  `SETUP-SYNC.md`, `app/auth.js`) and their data syncs to their own rows in
+  Supabase automatically (§4.2 — always write through `idbPut`/`idbDel` so
+  records get sync stamps). Signing in on any device restores everything;
+  the sign-in gate is the only screen a device with no session ever shows.
+  Two further *optional* network layers degrade gracefully offline: the **AI
+  assistant** (Anthropic API, key in Settings — moving behind a server proxy
+  in v3 stage 4) and **online food search** (Open Food Facts, no key; imports
+  become custom per-100 g foods that sync and work offline). Never add a
+  network dependency to logging or training. The direction of travel is
+  [`V3-BRIEF.md`](V3-BRIEF.md) — read it before any UI work.
 - **Installable PWA.** Manifest + service worker make it installable to a phone
   home screen and usable with no connection.
-- **Single-file app logic.** Essentially the entire application (markup, styles,
-  and logic) lives in `index.html`. Keep it that way unless there's a strong
-  reason not to — it's what keeps the app dependency-free and easy to host.
+- **Plain files, no bundler.** `index.html` holds the markup; the JS lives in
+  `app/` as plain files served as-is (§2). The *foundation* (`config`, `db`,
+  `auth`, `sync`, `main`) is native **ES modules**; the v1 *views* are still
+  classic scripts sharing global scope and are being rewritten as modules stage
+  by stage (V3-BRIEF §6). Nothing is transpiled or bundled — you edit and it runs.
 
 If you're tempted to add React/Vue/a build tool: **don't**, unless the user
 explicitly asks and accepts that it introduces a build step and breaks the
 "drag-the-folder-to-any-host" simplicity. Prefer improving the vanilla code.
+A *thin backend* (Supabase Auth/RLS/Storage + one Edge Function proxying the
+AI) **is** in scope as of v3 — the "no backend" rule of v1 is superseded.
 
 ---
 
@@ -44,7 +52,19 @@ explicitly asks and accepts that it introduces a build step and breaks the
 
 ```
 fittrack/
-├── index.html          ← THE APP. All HTML, SVG icon sprite, and JS (<script>).
+├── index.html          ← Markup: SVG icon sprite, all view containers, nav, sign-in gate, script tags.
+├── app/
+│   ├── config.js       ← (module) Supabase project URL + publishable key for this deployment.
+│   ├── db.js           ← (module) IndexedDB wrapper + sync stamping (idbPut/idbDel/tombstones/wipeLocal).
+│   ├── auth.js         ← (module) Supabase Auth: sign up/in/out, token refresh, session in kv, legacy migration.
+│   ├── sync.js         ← (module) LWW sync engine + triggers; dispatches `ft:synced`.
+│   ├── main.js         ← (module, entry) boot order, sign-in gate, restore-before-seed, sign-out/erase.
+│   ├── targets.js      ← structured targets: parseTarget / targetLabel / exTargetText / normalizeTarget / circuits.
+│   ├── exercises.js    ← EX_SEED_MORE — the bulk of the exercise catalog (318 total with seed.js), with cues.
+│   ├── library.js      ← Exercise library view: search/filter, detail, equipment-aware alternatives, history.
+│   ├── util.js seed.js plan.js settings.js qr.js model.js coach.js today.js
+│   │   food.js body.js train.js settingsView.js events.js
+│   │                   ← v1 views (classic scripts, global scope; load order = index.html order).
 ├── styles.css          ← The entire design system ("Athletic Dark" — see §7).
 ├── fonts/              ← Self-hosted Barlow Condensed woff2 (display numerals).
 ├── manifest.json       ← PWA manifest (name, icons, theme, display:standalone).
@@ -57,13 +77,18 @@ fittrack/
 ├── README.md           ← End-user deploy/install instructions.
 ├── SETUP-SYNC.md       ← One-time Supabase sync setup steps (user-facing).
 ├── supabase-schema.sql ← Schema for the sync backend (run in Supabase SQL editor).
-├── UI-UX-PLAN.md       ← Active UI/UX enhancement plan + session log (see §10).
+├── UI-UX-PLAN.md       ← Session log + older UI plan (see §10).
+├── V2-SPEC.md          ← v2 data-model spec (exercises as entities, per-100 g food, analytics) — still valid.
+├── V3-BRIEF.md         ← **Current product brief + build order** (Coach · Home · Train, accounts, AI coach).
 └── CLAUDE.md           ← This file.
 ```
 
-Nearly all work happens in **`index.html`**. It's organised top-to-bottom as:
-`<head>` (meta + manifest link + the entire `<style>` block) → `<body>` (all
-five view containers + bottom nav + modal root + toast) → one big `<script>`.
+Module ↔ legacy bridge: each foundation module also assigns its exports onto
+`window` (e.g. `idbPut`, `syncNow`, `authUser`, `appSignOut`) so the classic
+view scripts can call them; classic scripts expose the state modules need via
+`var` (`SET`, `curView`) or plain function declarations. Classic scripts run
+first (they only *define* things at load), modules run after and `main.js`
+boots. Remove a bridge entry only when its last classic caller is gone.
 
 ---
 
@@ -77,18 +102,26 @@ python3 -m http.server 8099
 # then open http://localhost:8099/index.html
 ```
 
-There is no automated test suite in the repo. During development the app was
+There is no automated test suite in the repo. During development the app is
 verified by driving it with Playwright (headless Chromium): load the page,
 click through flows, and assert on DOM text + capture `pageerror`/`console`
-events. If you add Playwright checks, key smoke flows are: log a food, log a
+events. Key smoke flows: sign up / sign in at the gate, log a food, log a
 meal, add a measurement, log a workout, and confirm `#calRemain` / macro bars
-update with **no console errors**.
+update with **no console errors**. Wait for `body[data-ready="1"]` before
+asserting. **Test harness rules learned:** (1) create the context with
+`serviceWorkers:'block'` — the SW's install fetch bypasses `page.route`, so
+it would cache the real (empty) `app/config.js` and break the second load;
+(2) mock Supabase by routing `**/app/config.js` to a stub `CONFIG` pointing at
+a fake host and `page.route`-ing that host's `/auth/v1/*` and
+`/rest/v1/records` endpoints (see the stage-1 suite in the 2026-08-18 session
+log for the shape).
 
 **Common gotcha when testing:** IndexedDB persists per-origin. A fresh
-Playwright `chromium.launch()` uses a clean profile so the DB starts empty and
-`seedIfEmpty()` reseeds. If you test in your normal browser, use the in-app
-**⚙️ Settings → Erase all data** (or devtools → Application → IndexedDB) to
-reset.
+Playwright `chromium.launch()` uses a clean profile so the DB starts empty →
+sign-in gate → after sign-in the app pulls the account first and seeds only
+what is still missing. If you test in your normal browser, **⚙️ Settings →
+Erase all data** wipes the device (no tombstones, cloud untouched) and returns
+to the gate. **Never advise "Clear site data"** as a cache fix — see V2-SPEC §9a.
 
 ---
 
@@ -115,9 +148,10 @@ send any user data beyond the typed question.
   Every navigation goes through `go()`.
 
 ### 4.2 Data layer (IndexedDB)
-A tiny promise wrapper around IndexedDB (db name `fittrack`, version 2 —
-v2 added the `water` store; migrations run in `onupgradeneeded`, whose
-`contains()` guards make it safe for both fresh installs and upgrades):
+A tiny promise wrapper around IndexedDB (`app/db.js`; db name `fittrack`,
+version 4 — v2 added `water`, v3 `exercises`, v4 `plans`; migrations run in
+`onupgradeneeded`, whose `contains()` guards make it safe for both fresh
+installs and upgrades):
 
 - `openDB()` — opens/creates stores in `onupgradeneeded`.
 - `tx(store, mode)` → object store handle.
@@ -136,6 +170,8 @@ v2 added the `water` store; migrations run in `onupgradeneeded`, whose
 | `photos` | `id` | `date` | `{id, date, category:'Front'|'Side'|'Back', note, blob:Blob, ts}` |
 | `workouts` | `id` | `date` | `{id, date, dayKey:'A'|'B'|'C', title, notes, ts, exercises:[{name, target, mode:'reps'|'time', rest?, perSide?, sets:[{weight, reps, done?} \| {secs, rest, done?}]}]}` — `mode:'time'` = interval work logged as work/rest seconds per interval (e.g. skipping); the row's `rest` drives the rest timer. `perSide:true` means the logged reps are **per side** (single-leg RDL, lunges) — surfaced as "per side" in the header and `REPS / SIDE` on the column |
 | `water` | `id` | `date` | `{id, date, ml, ts}` — one row per +250/+500 tap; daily total is the sum (target `WATER_TARGET_ML` = 3000) |
+| `exercises` | `id` | — | the catalog: `{id, name, aliases, pattern, primary, secondary, equipment, unilateral, metric, loadType, defaultRest, region, cues, custom}` — 318 built-ins seeded unstamped (`fromSync=true`, versioned by `EXERCISE_SEED_VERSION`), user-added/edited ones sync |
+| `plans` | `id` | — | **workout plans are entities** (v3 stage 2): `{id, name, description, days:{A:{title, ex:[…]}}, schedule:{Mon:'A'}, source:'seed'|'custom'|'ai'|'shared', sharedFrom?, createdAt}` — one is active (kv `activePlan`); `PROG` points at it; sessions store `planId` |
 
 `kv` singletons:
 - `{k:'settings', targets:{kcal, protein, carbs, fat}, goalWeight, startWeight}`
@@ -144,9 +180,14 @@ v2 added the `water` store; migrations run in `onupgradeneeded`, whose
   keystroke/tick while logging (deliberately device-local, never synced);
   cleared by "Finish session". Train tab + `startSession` offer to resume it.
 
-**Cloud sync (optional):** stores in `SYNC_STORES` (`foods`, `meals`, `log`,
-`measurements`, `workouts`, `water`) sync to a single generic Supabase `records` table
-(last-write-wins). `idbPut` stamps `up` (ms timestamp) and `idbDel` records a
+**Accounts & sync (`app/auth.js`, `app/sync.js`):** users sign in with
+Supabase Auth (email + password; project URL/key in `app/config.js`). The
+session `{access, refresh, exp, email, uid}` lives in kv `session` (device-
+local, never synced or exported; no password stored). Stores in `SYNC_STORES`
+(`foods`, `meals`, `log`, `measurements`, `workouts`, `water`, `exercises`)
+sync to a single generic Supabase `records` table keyed `(user_id, store, id)`
+with row-level security — the client never sends `user_id`; the server default
+`auth.uid()` fills it and RLS scopes every pull (last-write-wins). `idbPut` stamps `up` (ms timestamp) and `idbDel` records a
 tombstone in `kv.tombstones`; pulled changes pass `fromSync=true` to bypass
 stamping. **Always mutate through these helpers** or records won't sync.
 **Deletes are last-write-wins too**: a pulled tombstone only applies if it is
@@ -161,12 +202,22 @@ skipped forever by any high-water mark. Trivial data volume makes full pull the
 right trade. Sync triggers: launch, 2 s after a local write (`syncSoon`),
 `syncFlush` on tab hide/pagehide (phones freeze timers, so push before the OS
 suspends us), on tab re-focus, every 5 min while visible, on `online`, and the
-Settings "Sync now" button.
-Photos and `kv` are device-local. Sync credentials live in `SET.sync` and are
-stripped from backups; new devices onboard via Settings → "📱 Link another
-device" (QR/link with a `#sync=` payload; hand-written QR encoder in
-`index.html` — verify changes to it against a real decoder, see link-test). The service worker must never intercept cross-origin
-requests (see the origin check in `service-worker.js`).
+Settings "Sync now" button. After a pull `sync.js` dispatches `ft:synced`
+(`{applied, kvApplied, exApplied}`) and `main.js` reloads the catalog/program
+and repaints — the engine never touches views. Push/pull state lives in kv
+`syncState` (`lastPush`, `lastSync`).
+**Boot order (`main.js`) is load-bearing:** openDB → settings → `authInit`
+(migrates v1 `SET.sync` creds into a session + kv `sbproject`, strips them) →
+gate if no session → **if the device is empty, pull first, then seed** what
+the account didn't have (`seedIfEmpty` adopts `mealSeedVersion` instead of
+reseeding when meals already exist — reseeding would push tombstones over every
+other device). Sign-out and Erase wipe every store via `wipeLocal()` (no
+tombstones → never cascades) and reload to the gate. A dead refresh token
+(`e.signedOut`) returns to the gate with a message. Photos and non-`SYNCED_KV`
+`kv` are device-local. The QR encoder (`app/qr.js`) is kept for the coming
+invite flow; the v1 "Link another device" flow is gone — signing in is the
+link. The service worker must never intercept cross-origin requests (see the
+origin check in `service-worker.js`).
 
 **Macro model:** each food stores macros **per one serving**. `serving` is a
 human label. For weight/volume foods it's `"100 g"`, `"40 g"`, `"100 ml"` etc,
@@ -190,18 +241,27 @@ so logging is a decimal multiplier (e.g. 180 g chicken = `1.8` servings of a
   slot: `[id, day('Mon'..'Sun'), slot('Breakfast'|'Lunch'|'Snack'|'Dinner'),
   name, items[]]`. Plus lookup consts `DAY_FULL`, `DAY_ORDER`, `SLOT_ORDER`,
   `SLOT_KEY`.
-- **`DEFAULT_PROGRAM`** — seed for the training program. At runtime the program
-  is **user data**: kv key `program` (`{days:{A:{title,ex:[{name,target,type,
-  mode,rest}]}}, schedule:{Mon:'A',…}}`), loaded into the `PROG` global and
-  edited in-app (Train → ✎ per day, + Add day). `mode:'reps'|'time'` picks the
-  set-row layout (kg × reps vs seconds), `rest` the per-exercise rest-timer
-  seconds, and `perSide` marks unilateral work; `loadProgram()` migrates missing
-  `mode`/`rest`/`perSide` **in-memory only** — never idbPut from a migration, or
-  a mere page load would out-stamp a newer synced program (LWW). Missing `rest`
-  falls back to `defaultRest(ex)` (heavy compounds 150/120 s → isolation 60 s)
-  rather than the old flat 90 s; missing `perSide` is inferred from
-  `UNILATERAL_RE` against the exercise name. `type` (one of `EX_TYPES`) drives the
-  Coach's progression advice. Equipment likewise: kv key `equipment` →
+- **`DEFAULT_PROGRAM`** — seed for the first plan. At runtime programs are
+  **plans** (store `plans`, §4.2): `loadProgram()` loads them all into `PLANS`,
+  points `PROG` at the active one (kv `activePlan`), and on a device with no
+  plans yet derives one from the legacy kv `program` (`plan-legacy`) or the
+  default (`plan-default`) — written **unstamped** with a deterministic id so
+  independently-migrating devices converge under LWW and nothing is pushed
+  until the user edits (`saveProgram()` stamps the active plan). Train shows
+  the active plan + a plan library (switch / new / duplicate / rename / delete).
+  Each program exercise: `{name, tgt, target, mode:'reps'|'time'|'rounds',
+  rest, perSide, type, items?}` — **`tgt` is the structured target**
+  (`app/targets.js`: `{sets, reps:{min,max}|'amrap'}` · `{sets, secs}` ·
+  `{rounds}`), `target` is the *derived* label from `targetLabel()` and carries
+  the side for unilateral work (`"3 × 10 per leg"`, via `sideWord()`), `mode`
+  picks the logger layout (kg × reps · work/rest seconds · **circuit rounds**
+  with `items:[{name, reps|secs, perSide}]`). `normalizeTarget()` in
+  `loadProgram()` parses legacy free-text targets and infers `perSide` from the
+  catalog **in-memory only** — never idbPut from a migration, or a mere page
+  load would out-stamp a newer synced plan (LWW). Missing `rest` falls back to
+  `defaultRest(ex)` (catalog first, then heavy compounds 150/120 s → isolation
+  60 s). `type` (one of `EX_TYPES`) still drives the Coach's progression advice.
+  Always display targets through `exTargetText(e)`, never raw `e.target`. Equipment likewise: kv key `equipment` →
   `EQUIP` global, edited via Train → 🎒 My gym. Both kv keys sync across
   devices (`SYNCED_KV`); seeded only when absent — never overwrite user edits.
 
@@ -217,8 +277,13 @@ so logging is a decimal multiplier (e.g. 180 g chicken = `1.8` servings of a
   (canvas line chart with a dashed goal line), and the measurement history list.
 - `renderPhotos()` — grid of photo thumbnails from stored blobs
   (`URL.createObjectURL`).
-- `renderTrainStart()` + `renderWorkoutHistory()` — the Day A/B/C start buttons
-  and past-session cards.
+- `renderTrainStart()` + `renderWorkoutHistory()` — active-plan row (→ plan
+  library), the day start buttons and past-session cards.
+- `renderLibrary()` (`app/library.js`, `#view-library`) — the exercise library:
+  search, pattern chips, "only what my gym can do" (`hasEquip()` maps catalog
+  equipment tokens onto `EQUIP`), detail with cues/muscles/kit/history and
+  `exAlternatives()` (same pattern + shared muscle, available-with-my-gym
+  first) — the deterministic half of the coach's future "swap this exercise".
 
 ### 4.5 Modals
 All modals use **`openModal(html)`** (injects a bottom-sheet into `#modalRoot`,
@@ -272,8 +337,9 @@ same pattern, being careful not to clobber `custom` foods.)
 `service-worker.js` cache-first-serves the app shell listed in `ASSETS`. The
 cache name is **`const CACHE = 'fittrack-vN'`**.
 
-**Every time you change `index.html` (or any cached asset), bump the `CACHE`
-version** (e.g. `fittrack-v2` → `fittrack-v3`). The version bump is what makes
+**Every time you change `index.html`, `styles.css` or anything under `app/`
+(all listed in `ASSETS`), bump the `CACHE` version** — and add any new file to
+`ASSETS` (e.g. `fittrack-v2` → `fittrack-v3`). The version bump is what makes
 installed clients fetch the new files instead of serving the stale cached copy;
 `activate` deletes old caches. Forgetting this is the #1 "my change didn't show
 up" bug. After deploying, the user opens the app once online and it self-updates

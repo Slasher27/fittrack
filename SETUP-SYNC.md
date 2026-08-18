@@ -1,66 +1,73 @@
-# FitTrack cloud sync — one-time setup (~5 minutes)
+# FitTrack accounts & sync — setup
 
-Sync keeps your food log, meals, measurements and workouts identical across
-all your devices (phone, desktop). The app stays offline-first — IndexedDB
-remains the instant local store and syncing happens in the background
-whenever you're online. Photos stay on-device in v1.
+Every user signs in with an email + password. Their food log, meals,
+measurements, workouts, program and gym sync to their account automatically,
+so signing in on any device restores everything. The app stays offline-first
+— IndexedDB is the instant local store; syncing happens in the background
+whenever the device is online. Photos stay on-device for now.
 
-## 1. Create the (free) Supabase project
+There is nothing for users to configure. The one-time setup below is for
+**whoever deploys the app** (the owner).
 
-1. Go to <https://supabase.com> → **Start your project** → sign up.
-2. **New project** → name it `fittrack`, pick a strong database password
-   (you won't need it day-to-day), choose a region near you (e.g. West EU).
+## 1. Create the (free) Supabase project — once
 
-## 2. Create the database table
+1. <https://supabase.com> → **Start your project** → sign up.
+2. **New project** → name it `fittrack`, strong database password, region
+   near you.
 
-1. In the project, open **SQL Editor** → **New query**.
-2. Paste the entire contents of `supabase-schema.sql` (in this folder) → **Run**.
+## 2. Create / upgrade the database — once, and again after schema changes
+
+1. **SQL Editor → New query**, paste the whole of `supabase-schema.sql`, **Run**.
    You should see "Success. No rows returned".
+2. It is safe to re-run. On a project that already has the v1 single-user
+   table it upgrades in place: existing rows are handed to the first account
+   ever created (the owner) and row-level security is switched on so every
+   user only ever sees their own rows.
 
-## 3. Create your user account
+## 3. Auth settings — once
 
-1. **Authentication → Users → Add user → Create new user.**
-2. Enter your email + a password (this is what the app signs in with).
-   Tick **Auto confirm user**.
+**Authentication → Providers → Email**: leave **Enable Email provider** on.
+For an invite-only app with no email templates yet, turn **Confirm email**
+*off* so people can sign in immediately after creating an account. (If you
+leave it on, the app shows "check your email to confirm", which also works.)
 
-## 4. Get the two values the app needs
+## 4. Point the app at the project — once per deployment
 
-1. **Project Settings (gear) → API Keys**:
-   - **Project URL** — looks like `https://abcdefgh.supabase.co`
-   - **Publishable key** — starts with `sb_publishable_…`. (Older projects
-     call this the "anon public" key, a long `eyJ…` string — either works.
-     This key is designed to be public; your data is protected by your
-     sign-in, not by hiding this key.)
+**Project Settings (gear) → API Keys**: copy the **Project URL**
+(`https://xxxx.supabase.co`) and the **Publishable key**
+(`sb_publishable_…`; older projects show an "anon public" `eyJ…` key —
+either works). Put both in [`app/config.js`](app/config.js):
 
-## 5. Configure the app (first device only)
+```js
+export const CONFIG = {
+  supabaseUrl: 'https://xxxx.supabase.co',
+  supabaseKey: 'sb_publishable_…',
+};
+```
 
-1. FitTrack → ⚙️ **Settings → Cloud sync**.
-2. Fill in: Project URL, your email, your password, the anon key.
-3. Tap **Sync now** — the status line should show "Synced ✓".
+This key is designed to be public: data is protected by each user's sign-in
+and row-level security, not by hiding the key. Deploy as usual (bump the
+service-worker `CACHE` version — CLAUDE.md §6).
 
-That's it. From then on the app syncs automatically a few seconds after any
-change, on every launch, when you switch away from the app, and every few
-minutes while it's open.
+## 5. Users
 
-## 6. Add a phone / tablet / any other device (no typing)
-
-On the device that's already set up: ⚙️ **Settings → 📱 Link another
-device**. Then, on the new device, either:
-
-- **Scan the QR code** with the camera and open the link, or
-- **Copy/Share the link** to yourself (email, WhatsApp…) and open it there.
-
-The new device shows a confirmation ("Set up sync as … your email?") — tap
-**Set up & sync** and it signs in and pulls everything. Nothing to type.
-
-> ⚠️ The QR/link contains your sync password. Only share it with yourself,
-> and delete the message after the new device is linked.
+- **First launch on any device** shows the sign-in screen. New people tap
+  *Create an account*; existing users sign in and their data is restored
+  before anything else appears.
+- **Devices upgraded from v1** (which stored sync credentials in Settings)
+  migrate silently: the stored session is reused, the credentials are removed
+  from Settings, and the account keeps working — no re-login.
+- **Settings → Account** shows who is signed in, *Sync now*, and *Sign out of
+  this device* (which removes the local copy; the account keeps everything).
+- **Erase all data** (Settings) clears this device only and returns to the
+  sign-in screen. The cloud copy is untouched; signing in restores it.
 
 ## Notes
 
-- **Conflicts:** last write wins per record — fine for one person; just
-  avoid editing the same meal on two offline devices at once.
-- **Backups:** the ⚙️ backup file never contains your sync password or API
-  keys; restoring a backup keeps the device's existing credentials.
-- **Erase all data** (Settings) only clears the device, not the cloud. To
-  reset the cloud too, run `delete from records;` in the SQL Editor.
+- **Conflicts:** last write wins per record. Deletes obey the same rule.
+- **Backups:** the ⚙️ backup file never contains sessions, keys or
+  credentials.
+- **Reset one user's cloud data:** `delete from records where user_id = '<uuid>';`
+  (Authentication → Users shows the uuid). Then *Erase all data* on their
+  devices.
+- The old "Link another device" QR flow is gone — signing in *is* the link.
