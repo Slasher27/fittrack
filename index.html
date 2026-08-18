@@ -1473,7 +1473,7 @@ function openModal(html){const r=$('#modalRoot');
     else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}
   });
 }
-function closeModal(){clearInterval(restInt);$('#modalRoot').innerHTML='';document.body.style.overflow='';}
+function closeModal(){clearInterval(restInt);wakeOff();$('#modalRoot').innerHTML='';document.body.style.overflow='';}
 
 async function logFoodModal(foodId){
   const f=await idbGet('foods',foodId);if(!f)return;
@@ -1844,7 +1844,7 @@ async function startSession(dayKey,existing){
         sets:Array.from({length:n},(_,i)=>e.mode==='time'?{secs:''}:{weight:prev&&prev[i]?prev[i].weight:'',reps:''})};})};
   drawSession(session,lastMap,!existing);
 }
-function drawSession(session,lastMap,drafting){
+function drawSession(session,lastMap,drafting){wakeOn();
   // sessions saved before modes existed: pull mode/rest from today's program
   session.exercises.forEach(ex=>{const pe=progEx(ex.name);if(!ex.mode)ex.mode=pe?.mode||'reps';if(ex.rest==null&&pe)ex.rest=pe.rest;
     if(ex.perSide==null)ex.perSide=pe?pe.perSide:isUnilateral(ex.name);});
@@ -1944,6 +1944,12 @@ function setRow(ei,si,s,ex,ph){
   if(ex&&ex.mode==='time')return `<div class="setrow time">${tick}<input type="number" inputmode="numeric" placeholder="${ph&&ph.secs?ph.secs:'0'}" aria-label="Interval ${si+1}, work seconds" value="${s.secs??''}"><input type="number" inputmode="numeric" placeholder="${ph&&ph.rest?ph.rest:'0'}" aria-label="Interval ${si+1}, rest seconds" value="${s.rest??''}"><button class="del" data-delset aria-label="Remove interval ${si+1}">✕</button></div>`;
   return `<div class="setrow">${tick}<input type="number" inputmode="decimal" placeholder="0" aria-label="Set ${si+1} weight, kg" value="${s.weight??''}"><input type="number" inputmode="numeric" placeholder="${ph&&ph.reps?ph.reps:'0'}" aria-label="Set ${si+1} reps${ex&&ex.perSide?' per side':''}" value="${s.reps??''}"><button class="del" data-delset aria-label="Remove set ${si+1}">✕</button></div>`;
 }
+// Screen wake lock: keep the phone awake while a session is open in the logger.
+// The OS releases the lock whenever the tab is hidden, so re-acquire on return.
+let wakeLock=null,wantWake=false;
+async function wakeOn(){wantWake=true;if(!('wakeLock'in navigator)||wakeLock)return;try{wakeLock=await navigator.wakeLock.request('screen');wakeLock.addEventListener('release',()=>{wakeLock=null;});}catch(e){wakeLock=null;}}
+function wakeOff(){wantWake=false;try{if(wakeLock)wakeLock.release();}catch(e){}wakeLock=null;}
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&wantWake)wakeOn();});
 function restLabel(sec){return sec>=90?`${Math.floor(sec/60)}:${String(sec%60).padStart(2,'0')} min`:`${sec}s`;}
 
 let restInt=null;
