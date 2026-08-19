@@ -93,4 +93,4 @@ export async function signOut() {
 }
 
 // legacy bridge for classic scripts
-Object.assign(window, { authSignedIn: signedIn, authUser: currentUser, authConfigured: configured, sb, ensureToken });
+Object.assign(window, { authSignedIn: signedIn, authUser: currentUser, authConfigured: configured, authProject: projectInfo, sb, ensureToken });

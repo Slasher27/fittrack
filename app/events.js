@@ -20,6 +20,7 @@ function go(view){
   if(view==='gym')renderGym();
   if(view==='library')renderLibrary();
   if(view==='exhist')renderExHist();
+  if(view==='coach')renderCoachTab();
 }
 
 /* ---------- global events ---------- */
@@ -67,6 +68,10 @@ document.addEventListener('click',async e=>{
   if(t.closest('#libBack')){go('train');return;}
   if(t.closest('#sesBack')){go('train');return;}
   if(t.closest('#exhBack')){if(exhistFrom==='session'&&SES){go('session');}else go(exhistFrom&&exhistFrom!=='exhist'?exhistFrom:'train');return;}
+  const cq=t.closest('[data-coachq]');if(cq){go('coach');coachSend(cq.dataset.coachq);return;}
+  const cok=t.closest('[data-coachok]');if(cok){coachDecide(cok.dataset.coachok,'accept');return;}
+  const cno=t.closest('[data-coachno]');if(cno){coachDecide(cno.dataset.coachno,'decline');return;}
+  if(t.closest('#coachClearBtn')){coachClear();return;}
   const xh=t.closest('[data-exhist]');if(xh){renderExHist(xh.dataset.exhist);go('exhist');return;}
   const lp=t.closest('[data-libpat]');if(lp){libPattern=lp.dataset.libpat;renderLibrary();return;}
   const lg=t.closest('[data-libgo]');if(lg){libOpen=lg.dataset.libgo;libQ='';libPattern='';renderLibrary();const el=document.querySelector(`[data-libex="${CSS.escape(libOpen)}"]`);if(el)el.scrollIntoView({block:'center'});return;}
@@ -125,4 +130,5 @@ $('#weightChart').addEventListener('click',e=>{
 $('#prevDay').onclick=()=>{const d=parseD(curDate);d.setDate(d.getDate()-1);curDate=dstr(d);renderToday();};
 $('#nextDay').onclick=()=>{const d=parseD(curDate);d.setDate(d.getDate()+1);curDate=dstr(d);renderToday();};
 window.closeModal=closeModal;
+$('#coachForm').addEventListener('submit',e=>{e.preventDefault();coachSend($('#coachInput').value);});
 

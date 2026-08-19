@@ -228,7 +228,7 @@ architecture lands; update it then.
 | 1 | ~~ES-module split + Supabase Auth + RLS + `user_id` scoping + sign-in restore~~ **shipped 2026-08-18** (invite QR itself comes with stage 5; sign-up is open until then) | foundation; sign-in replaces link-device QR |
 | 2 | ~~Exercise library (structured, hundreds) + circuits + structured targets + `plans` entity / plan library (active plan)~~ **shipped 2026-08-18** (318 exercises with cues, mobility pattern, per-leg/arm labels, circuits as rounds, plan library) | the base for everything training |
 | 3 | ~~Train rebuilt: full-screen logger, per-metric rows, in-set history, PBs, per-exercise history, rollups~~ **shipped 2026-08-18** (+ flat visual rules applied app-wide: shadows/blur/glow removed) | "no stats / PBs" fixed |
-| 4 | Edge Function AI proxy + Coach tab (chat, previews, tools: program / meal plan / targets / log / food) | "where do I ask?" fixed |
+| 4 | ~~Edge Function AI proxy + Coach tab (chat, previews, tools: program / meal plan / targets / log / food)~~ **shipped 2026-08-18** (meal-plan editing lands with the food model in stage 6) | "where do I ask?" fixed |
 | 5 | Onboarding conversation + generation + validation; equipment / profile-change adaptation; **plan sharing** (share, import + equipment check, update prompt) | your original prompt, in-app; invite flow complete; train together |
 | 6 | Food: per-100 g model, describe-to-log, recipes; then bundled DB + barcode | food friction fixed |
 | 7 | **Weekly review**; Home + Coach → Progress polish; photos to Storage; metering | coach keeps users on track; ready for more invitees |

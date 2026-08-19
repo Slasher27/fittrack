@@ -498,3 +498,20 @@ body.session-mode .view{padding-bottom:40px}
 .kpis .kpi{padding:12px}
 .kpis .kpi .v{font-family:var(--font-display);font-size:24px;font-weight:700;line-height:1}
 .kpis .kpi .l{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:700;margin-top:4px}
+
+/* ---------- Coach chat ---------- */
+.chat{display:flex;flex-direction:column;gap:8px;padding-bottom:70px}
+.msg{max-width:88%;padding:10px 12px;border-radius:14px;font-size:14.5px;line-height:1.4}
+.msg.me{align-self:flex-end;background:var(--volt);color:var(--volt-ink);border-bottom-right-radius:4px}
+.msg.ai{align-self:flex-start;background:var(--card);border:1px solid var(--line);border-bottom-left-radius:4px}
+.msg.ai p{margin:0 0 6px}.msg.ai p:last-child{margin:0}
+.msg.ai.err{border-color:var(--danger);color:var(--danger)}
+.msg.ai.thinking{color:var(--muted)}
+.msg.sys{align-self:center;font-size:12px;color:var(--muted);background:none;padding:2px 8px}
+.msg.tool{align-self:stretch;max-width:none;margin:0}
+.msg.tool.pending{border-color:var(--volt)}
+.msg.tool.declined{opacity:.6}
+.chatbar{position:fixed;left:0;right:0;bottom:calc(var(--nav-h) + env(safe-area-inset-bottom));display:flex;gap:8px;padding:8px 16px;background:var(--bg);border-top:1px solid var(--line);z-index:25;max-width:680px;margin:0 auto}
+.chatbar input{flex:1;min-height:44px}
+.chatbar .btn{min-height:44px;padding:0 18px;width:auto;flex:none}
+@media (min-width:940px){.chatbar{left:216px;right:0;bottom:0;max-width:none;padding:10px 28px}}

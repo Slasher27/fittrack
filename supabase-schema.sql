@@ -39,3 +39,20 @@ create policy "own rows" on public.records
   for all to authenticated
   using (user_id = auth.uid())
   with check (user_id = auth.uid());
+
+-- v3 stage 4 (2026-08-18): coach usage log — written by the `coach` Edge Function with the
+-- service role (per-user daily quota + cost visibility). Users can read their own rows.
+create table if not exists public.ai_usage (
+  id            bigint generated always as identity primary key,
+  user_id       uuid        not null,
+  at            timestamptz not null default now(),
+  model         text,
+  kind          text,
+  input_tokens  integer     not null default 0,
+  output_tokens integer     not null default 0,
+  cache_read    integer     not null default 0
+);
+create index if not exists ai_usage_user_at_idx on public.ai_usage (user_id, at);
+alter table public.ai_usage enable row level security;
+drop policy if exists "own usage" on public.ai_usage;
+create policy "own usage" on public.ai_usage for select to authenticated using (user_id = auth.uid());

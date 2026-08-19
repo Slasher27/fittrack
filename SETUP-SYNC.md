@@ -62,6 +62,29 @@ service-worker `CACHE` version — CLAUDE.md §6).
 - **Erase all data** (Settings) clears this device only and returns to the
   sign-in screen. The cloud copy is untouched; signing in restores it.
 
+## 6. The AI coach — one Edge Function + one secret (v3 stage 4)
+
+The coach talks to Claude through a tiny server function so users never handle
+an API key. Two things to do once, in the Supabase dashboard:
+
+1. **Deploy the function.** Either
+   - **CLI:** `supabase functions deploy coach --no-verify-jwt` from the repo
+     root (the code is in `supabase/functions/coach/index.ts`), or
+   - **Dashboard:** Edge Functions → *Deploy a new function* → *Via editor* →
+     name it `coach`, paste the contents of `supabase/functions/coach/index.ts`,
+     deploy. Then open the function's settings and turn **Verify JWT** *off* —
+     the function verifies the user's session itself and needs to answer CORS
+     preflight requests (which carry no token).
+2. **Store the Anthropic key as a secret:** Edge Functions → *Manage secrets* →
+   add `ANTHROPIC_API_KEY` = your `sk-ant-…` key. Optional:
+   `COACH_DAILY_LIMIT` (default 60 requests per user per day).
+3. Re-run `supabase-schema.sql` (SQL Editor) — it now also creates the
+   `ai_usage` table the function uses for the quota. Safe to re-run.
+
+Users need to be **signed in** to use the coach (that is how the function knows
+who is asking and meters usage). A device in offline-only mode can still use
+the coach with its own key from ⚙️ Settings, exactly like the old Ask box.
+
 ## Notes
 
 - **Conflicts:** last write wins per record. Deletes obey the same rule.

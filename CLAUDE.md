@@ -27,8 +27,9 @@ protein target).
   records get sync stamps). Signing in on any device restores everything;
   the sign-in gate is the only screen a device with no session ever shows.
   Two further *optional* network layers degrade gracefully offline: the **AI
-  assistant** (Anthropic API, key in Settings — moving behind a server proxy
-  in v3 stage 4) and **online food search** (Open Food Facts, no key; imports
+  Coach** (Claude via the `coach` Edge Function when signed in — server-held
+  key, per-user quota; falls back to the user's own key from Settings when not
+  signed in; see §4.8) and **online food search** (Open Food Facts, no key; imports
   become custom per-100 g foods that sync and work offline). Never add a
   network dependency to logging or training. The direction of travel is
   [`V3-BRIEF.md`](V3-BRIEF.md) — read it before any UI work.
@@ -64,6 +65,8 @@ fittrack/
 │   ├── library.js      ← Exercise library view: search/filter, detail, equipment-aware alternatives, history.
 │   ├── analytics.js    ← derived training analytics: exerciseHistory/Bests, e1RM (Epley), PR detection, sessionSummary, weeklyVolume.
 │   ├── session.js      ← full-screen session logger (#view-session), rest timer, wake lock, exercise-history screen (#view-exhist).
+│   ├── coachai.js      ← the AI Coach tab: context snapshot, tools (read auto / write → preview → accept), client-side agent loop, chat UI.
+├── supabase/functions/coach/index.ts ← the ONLY server code: Edge Function proxy to Claude (holds the key, verifies session, daily quota).
 │   ├── util.js seed.js plan.js settings.js qr.js model.js coach.js today.js
 │   │   food.js body.js train.js settingsView.js events.js
 │   │                   ← v1 views (classic scripts, global scope; load order = index.html order).
@@ -138,8 +141,9 @@ non-nav full-screen views: `#view-plan` (📖 Plan/help via `#helpBtn`),
 (the workout logger — a view, not a modal; `body.session-mode` hides the nav)**,
 `#view-exhist` (per-exercise history; `exhistFrom` remembers where to go back
 to, and peeking at it mid-session keeps the rest timer/wake lock alive), and
-`#view-auth` (sign-in gate). **v3 rule: anything you *do* is a full screen;
-modals are for confirmations only.**
+`#view-auth` (sign-in gate). `#view-coach` is the first nav tab (Coach ·
+Today · Food · Weight · Train; Photos moved under Weight). **v3 rule: anything
+you *do* is a full screen; modals are for confirmations only.**
 
 **`#view-plan` / AI assistant:** the user's original coaching document lives
 in-app as `PLAN_SECTIONS` (8 `<details>` accordions). The Ask box calls the
@@ -322,6 +326,26 @@ actions include: `data-nav`, `data-quick`, `data-fseg`, `data-logfood`,
 by-`id` buttons (`#gearBtn`, `#addFoodBtn`, etc). **When you add a feature,
 follow this pattern** rather than attaching one-off listeners in render code
 (render output is innerHTML-replaced, so delegation is the safe choice).
+
+### 4.8 AI Coach (`app/coachai.js` + `supabase/functions/coach`)
+The agent loop runs **in the client** because every write touches IndexedDB
+and must be confirmed. Per turn: `coachContext()` (targets, weight trend, food
+averages, this-week volume by muscle, recent sessions/PRs, active plan, gym,
+fired coach insights) is prepended to the user text; the request carries the
+frozen `COACH_SYSTEM` (with `cache_control`) and `COACH_TOOLS`. **Read tools**
+(`get_exercise_history`, `search_exercises`) run immediately; **write tools**
+(`update_training_day`, `swap_exercise`, `update_schedule`, `log_food`,
+`log_water`, `log_weight`, `update_targets`, `update_equipment`) render a
+preview card via `previewFor()` and the loop *pauses* on a promise until the
+user taps Accept (→ `apply()` → `tool_result` "applied…") or Discard (→
+`tool_result` "user declined…"). Tool inputs become structured targets through
+`toolExToProgEx()` (catalog-resolved names, per-side inferred). Transcript
+persists in kv `coachChat` (device-local). Transport (`coachRequest`): signed
+in → `POST {project}/functions/v1/coach` with the session token; else own key
+→ direct Anthropic call; else an explanatory error. The Edge Function pins
+`claude-opus-5`, adaptive thinking, effort medium, `fallbacks:'default'`,
+`max_tokens ≤ 8000`, verifies the Supabase JWT, enforces `COACH_DAILY_LIMIT`
+via `ai_usage` and logs usage. Deploy steps: `SETUP-SYNC.md` §6.
 
 ### 4.7 Helpers & utilities
 `$`/`$$` (querySelector shorthands), `esc()` (HTML-escape — **always escape
