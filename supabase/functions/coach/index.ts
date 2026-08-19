@@ -32,14 +32,18 @@ Deno.serve(async (req) => {
   const auth = req.headers.get("authorization") || "";
   if (!auth.startsWith("Bearer ")) return json(401, { error: "Sign in to use the coach" });
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-  const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+  // Supabase is moving from SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY to JSON dictionaries
+  // (SUPABASE_PUBLISHABLE_KEYS / SUPABASE_SECRET_KEYS); accept either generation.
+  const firstOf = (json?: string) => { try { const o = JSON.parse(json || "{}"); const v = Object.values(o)[0]; return typeof v === "string" ? v : (v as any)?.key || ""; } catch { return ""; } };
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY") || firstOf(Deno.env.get("SUPABASE_PUBLISHABLE_KEYS"));
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || firstOf(Deno.env.get("SUPABASE_SECRET_KEYS"));
   const userClient = createClient(supabaseUrl, anonKey, { global: { headers: { Authorization: auth } } });
   const { data: { user }, error: uerr } = await userClient.auth.getUser();
   if (uerr || !user) return json(401, { error: "Session expired — sign in again" });
 
   // 2. Quota (service role bypasses RLS on ai_usage).
   const limit = Number(Deno.env.get("COACH_DAILY_LIMIT") || 60);
-  const admin = createClient(supabaseUrl, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+  const admin = createClient(supabaseUrl, serviceKey || anonKey);
   const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
   const { count } = await admin.from("ai_usage").select("*", { count: "exact", head: true })
     .eq("user_id", user.id).gte("at", since);
