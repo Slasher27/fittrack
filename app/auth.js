@@ -69,9 +69,14 @@ async function grant(body) {
 export async function signIn(email, password) { await grant({ email, password }); return currentUser(); }
 /* Returns {needsConfirm:true} when the project requires email confirmation
    (Supabase then returns a user without tokens). */
-export async function signUp(email, password) {
-  const res = await sb('/auth/v1/signup', { method: 'POST', body: JSON.stringify({ email, password }) }, false);
-  if (!res.ok) throw new Error(await readErr(res, 'sign-up failed'));
+export async function signUp(email, password, meta) {
+  const res = await sb('/auth/v1/signup', { method: 'POST', body: JSON.stringify({ email, password, data: meta || {} }) }, false);
+  if (!res.ok) {
+    const msg = await readErr(res, 'sign-up failed');
+    // the invite gate is a DB trigger; Supabase wraps its exception as a generic database error
+    if (/INVITE_REQUIRED|Database error/i.test(msg)) throw new Error('A valid invite code is needed to create an account. Ask the person who invited you for one.');
+    throw new Error(msg);
+  }
   const d = await res.json();
   if (d.access_token) { await adopt(d, email); return { needsConfirm: false }; }
   return { needsConfirm: true };

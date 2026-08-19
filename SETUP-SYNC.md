@@ -85,6 +85,23 @@ Users need to be **signed in** to use the coach (that is how the function knows
 who is asking and meters usage). A device in offline-only mode can still use
 the coach with its own key from ⚙️ Settings, exactly like the old Ask box.
 
+## 7. Invites, onboarding & plan sharing (v3 stage 5)
+
+Re-run `supabase-schema.sql` once more (SQL Editor). It adds:
+
+- **`invites`** + a database trigger that makes sign-up **invite-only**: every
+  new account must carry a valid, unused code. You create codes in the app —
+  ⚙️ Settings → Account → **Invite someone** — and share the QR or link
+  (`…/index.html?invite=CODE`). The invitee opens it, creates their account,
+  and goes straight into the setup questions; the coach then builds *their*
+  plan for *their* kit and goals. **Note:** once this runs, no one can sign up
+  without a code, including your own test accounts. The very first account on
+  a project (you) is exempt.
+- **`plan_shares`** for sharing a workout plan by email: Train → plan library
+  → ⇪ on a plan → their FitTrack email. They see it on their next launch and
+  import a copy into their library (their logs, targets and meals stay their
+  own); kit they don't have is flagged and can be swapped in one tap.
+
 ## Notes
 
 - **Conflicts:** last write wins per record. Deletes obey the same rule.

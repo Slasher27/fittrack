@@ -20,6 +20,7 @@ function showAuth(msg) {
   $('#view-auth').classList.remove('hidden');
   paintAuth();
   if (msg) $('#authStatus').textContent = msg;
+  if (authMode === 'up' && $('#authInvite').value) $('#authStatus').textContent = 'You were invited — create your account to get started.';
   if (!auth.configured()) { $('#authErr').textContent = 'This install is not configured yet (app/config.js has no Supabase project).'; $('#authSubmit').disabled = true; }
   setTimeout(() => $('#authEmail').focus(), 50);
 }
@@ -31,6 +32,7 @@ function paintAuth() {
   $('#authSubmit').textContent = up ? 'Create account' : 'Sign in';
   $('#authToggle').textContent = up ? 'Already have an account? Sign in' : 'New here? Create an account';
   $('#authPass').setAttribute('autocomplete', up ? 'new-password' : 'current-password');
+  $('#authInviteWrap').classList.toggle('hidden', !up);
   $('#authErr').textContent = ''; $('#authStatus').textContent = '';
 }
 
@@ -44,7 +46,11 @@ async function onAuthSubmit(e) {
   const btn = $('#authSubmit'); btn.disabled = true; btn.textContent = authMode === 'up' ? 'Creating…' : 'Signing in…';
   try {
     if (authMode === 'up') {
-      const r = await auth.signUp(email, pass);
+      const code = ($('#authInvite').value || '').trim().toUpperCase();
+      if (!code) { err.textContent = 'Enter your invite code (ask the person who invited you).'; return; }
+      const valid = await window.inviteValid(code);
+      if (valid === false) { err.textContent = 'That invite code is not valid or was already used.'; return; }
+      const r = await auth.signUp(email, pass, { invite_code: code });
       if (r.needsConfirm) { authMode = 'in'; paintAuth(); $('#authStatus').textContent = 'Check your email to confirm your account, then sign in.'; return; }
     } else {
       await auth.signIn(email, pass);
@@ -72,6 +78,10 @@ async function skipAuth() {
 }
 window.appShowAuth = function () { authMode = 'in'; showAuth(); };
 
+async function hasUserData() { // things only a person creates (seed foods/plans don't count)
+  for (const s of ['workouts', 'log', 'measurements']) if ((await idbGetAll(s)).length) return true;
+  return false;
+}
 async function isEmptyDevice() {
   for (const s of ['foods', 'workouts', 'log', 'measurements']) if ((await idbGetAll(s)).length) return false;
   return true;
@@ -87,9 +97,11 @@ async function start() {
   await window.seedIfEmpty();          // fills only what the account didn't have
   await window.loadExercises();        // must precede loadProgram — its migrations consult the catalog
   await window.loadProgram();
+  await window.loadProfile();
   window.applyTheme();
   $('#calTarget').textContent = window.SET.targets.kcal;
-  window.go('today');
+  // brand-new person (no data, no profile): the onboarding conversation is the front door
+  if (window.needsOnboarding(await hasUserData())) window.startOnboarding(false, true); else window.go('today'); // checked AFTER restore + seed: a restored account has logs → no onboarding; seed foods don't count
   if (!empty && auth.signedIn()) syncNow().then(n => { if (n) window.go(window.curView); }).catch(e => { if (e.signedOut) showAuth('Your session expired — sign in again.'); });
   if (!booted) {
     booted = true;
@@ -98,6 +110,7 @@ async function start() {
     if (window.SET.notify) window.registerPeriodic();
   }
   document.body.dataset.ready = '1'; // boot finished — automated checks wait on this
+  if (auth.signedIn() && navigator.onLine) setTimeout(() => window.checkPlanShares && window.checkPlanShares(), 1500); // anything shared with me?
 }
 function setStatus(t) { const el = $('#bootStatus'); if (el) { el.textContent = t; el.classList.toggle('hidden', !t); } }
 
@@ -121,6 +134,8 @@ window.appSignOut = async function () {
 window.appEraseDevice = async function () { await wipeLocal(); location.reload(); };
 
 $('#authForm').addEventListener('submit', onAuthSubmit);
+// arrived via an invite link (?invite=CODE): open straight into sign-up with the code filled in
+(function () { const m = location.search.match(/[?&]invite=([A-Za-z0-9]+)/); if (m) { authMode = 'up'; $('#authInvite').value = m[1].toUpperCase(); history.replaceState(null, '', location.pathname); } })();
 $('#authSkip').addEventListener('click', skipAuth);
 $('#authToggle').addEventListener('click', () => { authMode = authMode === 'up' ? 'in' : 'up'; paintAuth(); $('#authEmail').focus(); });
 

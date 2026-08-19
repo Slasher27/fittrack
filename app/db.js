@@ -35,7 +35,7 @@ export function idbClear(store) { return new Promise((res, rej) => { const r = t
 /* Cloud sync: stores below sync; writes stamp `up` (ms), deletes leave tombstones.
    `fromSync=true` bypasses stamping so pulled records don't re-trigger a push loop. */
 export const SYNC_STORES = new Set(['foods', 'meals', 'log', 'measurements', 'workouts', 'water', 'exercises', 'plans']);
-export const SYNCED_KV = new Set(['program', 'equipment', 'activePlan']); // kv keys that sync (never settings/secrets/session). 'program' is legacy (pre-plans) — kept so old rows still merge.
+export const SYNCED_KV = new Set(['program', 'equipment', 'activePlan', 'profile']); // kv keys that sync (never settings/secrets/session). 'program' is legacy (pre-plans) — kept so old rows still merge.
 export function idbPut(store, v, fromSync) {
   if (!fromSync && (SYNC_STORES.has(store) || (store === 'kv' && SYNCED_KV.has(v.k)))) { v.up = Date.now(); syncSoon(); }
   return new Promise((res, rej) => { const r = tx(store, 'readwrite').put(v); r.onsuccess = () => res(v); r.onerror = rej; });

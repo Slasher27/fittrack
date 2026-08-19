@@ -56,3 +56,69 @@ create index if not exists ai_usage_user_at_idx on public.ai_usage (user_id, at)
 alter table public.ai_usage enable row level security;
 drop policy if exists "own usage" on public.ai_usage;
 create policy "own usage" on public.ai_usage for select to authenticated using (user_id = auth.uid());
+
+-- v3 stage 5 (2026-08-19): plan sharing by email + invite-only sign-up.
+
+-- A share is a SNAPSHOT of a plan addressed to an email. The recipient sees it on their
+-- next launch and imports a copy (source 'shared'); their logs stay their own.
+create table if not exists public.plan_shares (
+  id         uuid        primary key default gen_random_uuid(),
+  from_user  uuid        not null default auth.uid(),
+  from_email text,
+  to_email   text        not null,
+  plan       jsonb       not null,
+  created_at timestamptz not null default now(),
+  claimed_at timestamptz,
+  status     text
+);
+create index if not exists plan_shares_to_idx on public.plan_shares (lower(to_email), claimed_at);
+alter table public.plan_shares enable row level security;
+drop policy if exists "share sender" on public.plan_shares;
+create policy "share sender" on public.plan_shares for all to authenticated
+  using (from_user = auth.uid()) with check (from_user = auth.uid());
+drop policy if exists "share recipient read" on public.plan_shares;
+create policy "share recipient read" on public.plan_shares for select to authenticated
+  using (lower(to_email) = lower(coalesce(auth.jwt() ->> 'email', '')));
+drop policy if exists "share recipient claim" on public.plan_shares;
+create policy "share recipient claim" on public.plan_shares for update to authenticated
+  using (lower(to_email) = lower(coalesce(auth.jwt() ->> 'email', '')))
+  with check (lower(to_email) = lower(coalesce(auth.jwt() ->> 'email', '')));
+
+-- Invites: any signed-in user can create codes; a code is consumed by the sign-up that uses it.
+create table if not exists public.invites (
+  code       text        primary key,
+  created_by uuid        not null default auth.uid(),
+  created_at timestamptz not null default now(),
+  note       text,
+  used_by    uuid,
+  used_at    timestamptz
+);
+alter table public.invites enable row level security;
+drop policy if exists "invites owner" on public.invites;
+create policy "invites owner" on public.invites for all to authenticated
+  using (created_by = auth.uid()) with check (created_by = auth.uid());
+
+-- Anonymous pre-check so the sign-up form can say "invalid code" before submitting.
+create or replace function public.invite_valid(p_code text) returns boolean
+language sql security definer set search_path = public as $$
+  select exists (select 1 from public.invites where code = upper(trim(p_code)) and used_by is null);
+$$;
+grant execute on function public.invite_valid(text) to anon, authenticated;
+
+-- The gate: every sign-up after the first account must carry a valid, unused invite code in
+-- its metadata (the app sends {invite_code} with the sign-up). The first user (the owner) is exempt.
+create or replace function public.check_invite() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare v_code text;
+begin
+  if (select count(*) from auth.users) = 0 then return new; end if;
+  v_code := upper(trim(coalesce(new.raw_user_meta_data ->> 'invite_code', '')));
+  if v_code = '' or not exists (select 1 from public.invites i where i.code = v_code and i.used_by is null) then
+    raise exception 'INVITE_REQUIRED';
+  end if;
+  update public.invites set used_by = new.id, used_at = now() where code = v_code;
+  return new;
+end $$;
+drop trigger if exists check_invite_trg on auth.users;
+create trigger check_invite_trg before insert on auth.users
+  for each row execute function public.check_invite();

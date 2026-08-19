@@ -11,9 +11,11 @@ function settingsModal(){
    <div class="in2" style="margin-top:8px"><div><span class="xs muted">Carbs g</span><input id="stC" type="number" value="${T.carbs}"></div><div><span class="xs muted">Fat g</span><input id="stF" type="number" value="${T.fat}"></div></div>
    <div class="in2" style="margin-top:8px"><div><span class="xs muted">Training-day kcal (optional)</span><input id="stKT" type="number" inputmode="numeric" placeholder="e.g. 2300" value="${T.kcalTrain||''}"></div><div><span class="xs muted">&nbsp;</span><span class="xs muted" style="display:block;padding-top:12px">Used on Mon/Wed/Fri &amp; logged-workout days</span></div></div>
    <div class="in2" style="margin-top:10px"><div><label class="fl">Start weight (kg)</label><input id="stSW" type="number" step="0.1" value="${SET.startWeight}"></div><div><label class="fl">Goal weight (kg)</label><input id="stGW" type="number" step="0.1" value="${SET.goalWeight}"></div></div>
+   <label class="fl">Profile</label>
+   <div class="row between"><div class="sm">${typeof PROFILE!=='undefined'&&PROFILE?`${esc(String(PROFILE.age))} y · ${esc(String(PROFILE.weightKg))} kg · goal ${esc(PROFILE.goal?.type||'')}`:'Not set up yet'}</div><button class="btn sec sm" id="stProfile">${typeof PROFILE!=='undefined'&&PROFILE?'Edit profile':'Set up'}</button></div>
    <label class="fl">Account</label>
    ${authUser()?`<div class="row between"><div><b>${esc(authUser().email||'')}</b><div class="xs muted" id="sbStatus">Checking…</div></div><button class="btn sec sm" id="sbSyncNow">Sync now</button></div>
-   <button class="btn ghost sm" style="margin-top:8px" id="sbSignOut">Sign out of this device</button>
+   <div class="btnrow" style="margin-top:8px"><button class="btn sec sm" id="sbInvite">Invite someone</button><button class="btn ghost sm" id="sbSignOut">Sign out of this device</button></div>
    <p class="xs muted" style="margin:6px 0 0">Your food, meals, measurements, workouts and program sync to your account automatically — sign in on any device to get them. Photos stay on this device for now.</p>`
    :`<div class="row between"><div><b>Not signed in</b><div class="xs muted">Data stays on this device only</div></div><button class="btn sec sm" id="sbSignIn">Sign in</button></div>
    <p class="xs muted" style="margin:6px 0 0">Sign in (or create an account) to back up this device and use the same data on your phone, tablet and desktop. Everything already logged here comes with you.</p>`}
@@ -53,6 +55,7 @@ function settingsModal(){
   let clearAI=false;
   const aiClr=$('#stAIClear');if(aiClr)aiClr.onclick=()=>{clearAI=true;$('#stAI').value='';$('#stAI').placeholder='Key will be removed on save';toast('Key removed on save');};
   const si=$('#sbSignIn');if(si)si.onclick=()=>{closeModal();appShowAuth();};
+  $('#stProfile').onclick=()=>{closeModal();startOnboarding(!!PROFILE);};
   lastSyncTime().then(t=>{const el=$('#sbStatus');if(el)el.textContent=t?'Last synced '+new Date(t).toLocaleString():'Not synced yet';});
   if($('#sbSyncNow'))$('#sbSyncNow').onclick=async()=>{
     if(!navigator.onLine)return toast('You are offline');
@@ -60,6 +63,7 @@ function settingsModal(){
     try{const n=await syncNow();$('#sbStatus').textContent='Synced ✓ '+new Date().toLocaleTimeString();toast(n?`Synced — ${n} update${n>1?'s':''} pulled`:'Synced ✓');go(curView);}
     catch(err){$('#sbStatus').textContent='Sync failed';toast('Sync failed: '+err.message);}
   };
+  if($('#sbInvite'))$('#sbInvite').onclick=()=>{closeModal();inviteModal();};
   if($('#sbSignOut'))$('#sbSignOut').onclick=async()=>{if(!confirm('Sign out and remove the copy of your data on this device? Your account keeps everything.'))return;toast('Signing out…');await appSignOut();};
   $('#stSave').onclick=async()=>{SET.targets={kcal:+$('#stK').value||0,protein:+$('#stP').value||0,carbs:+$('#stC').value||0,fat:+$('#stF').value||0,kcalTrain:+$('#stKT').value||null};SET.startWeight=+$('#stSW').value||83;SET.goalWeight=+$('#stGW').value||76.5;
     const aiIn=$('#stAI').value.trim();

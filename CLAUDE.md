@@ -66,6 +66,8 @@ fittrack/
 │   ├── analytics.js    ← derived training analytics: exerciseHistory/Bests, e1RM (Epley), PR detection, sessionSummary, weeklyVolume.
 │   ├── session.js      ← full-screen session logger (#view-session), rest timer, wake lock, exercise-history screen (#view-exhist).
 │   ├── coachai.js      ← the AI Coach tab: context snapshot, tools (read auto / write → preview → accept), client-side agent loop, chat UI.
+│   ├── onboard.js      ← profile (kv `profile`, synced), 6-step onboarding, Mifflin-St Jeor targets, AI plan generation (forced create_plan tool + validation).
+│   ├── share.js        ← invites (codes, QR/link, sign-up pre-check) and plan sharing by email (plan_shares snapshot → import copy).
 ├── supabase/functions/coach/index.ts ← the ONLY server code: Edge Function proxy to Claude (holds the key, verifies session, daily quota).
 │   ├── util.js seed.js plan.js settings.js qr.js model.js coach.js today.js
 │   │   food.js body.js train.js settingsView.js events.js
@@ -346,6 +348,39 @@ in → `POST {project}/functions/v1/coach` with the session token; else own key
 `claude-opus-5`, adaptive thinking, effort medium, `fallbacks:'default'`,
 `max_tokens ≤ 8000`, verifies the Supabase JWT, enforces `COACH_DAILY_LIMIT`
 via `ai_usage` and logs usage. Deploy steps: `SETUP-SYNC.md` §6.
+
+### 4.9 Profile, onboarding, invites, sharing (`app/onboard.js`, `app/share.js`)
+`kv.profile` (in `SYNCED_KV`) holds the onboarding answers; `PROFILE` global.
+A brand-new person (no profile **and** no user-created data — seeds don't
+count, see `hasUserData()` in `main.js`) is sent to `#view-onboard` after
+sign-in/skip: 6 steps (you · goal · training · where you train with a
+structured kit editor · food · lifestyle). `finishOnboarding()` writes EQUIP
+(`fresh` onboarding starts with an EMPTY kit; owner/edit keeps the gym),
+deterministic targets (`nutritionTargets()`: Mifflin-St Jeor × activity,
+goal delta, 2.2 g/kg protein, 0.9 g/kg fat, +150 kcal training days, goal
+weight from body-fat goal) into `SET`, then offers **Generate with the coach**
+(`kind:'onboard'`, forced `create_plan` tool, `generateSystem()` lists only
+exercises the gym can do; `validateGeneratedPlan()` resolves names to the
+catalog, flags unknown/missing-kit exercises and out-of-range kcal; preview →
+`acceptGeneratedPlan()` creates a `source:'ai'` plan and applies targets) or
+**Use the default plan**. `coachSystem()` uses `profileSummary(PROFILE)`
+instead of the owner's `PLAN_CONTEXT` when a profile exists. Existing devices
+with data are never forced through onboarding; the Coach card and Settings
+offer "Set up" / "Edit profile"; saving an edited profile offers to ask the
+coach to review the plan.
+**Adaptation** (`library.js`): `planAffected()` lists plan exercises the gym
+can no longer do with the first available `exAlternatives()`; `renderAdaptCard`
+on Train and My gym → *Apply swaps* (deterministic, keeps targets) or *Ask the
+coach* (`askCoachAboutKit()` opens the Coach with a prefilled request).
+**Invites**: `inviteModal()` creates codes (`invites` table via REST),
+shows QR (`drawQR`) + `?invite=CODE` link; `main.js` prefills sign-up from
+the URL, pre-checks via anon RPC `invite_valid`, and passes
+`{invite_code}` as sign-up metadata; the DB trigger `check_invite()` enforces
+it (first user exempt). **Sharing**: `sharePlanModal()` inserts a
+`plan_shares` snapshot for an email; `checkPlanShares()` (after boot, not
+during onboarding/session) offers unclaimed shares → import as
+`source:'shared'` copy with `sharedFrom`, kit issues flagged, row PATCHed
+`claimed_at`.
 
 ### 4.7 Helpers & utilities
 `$`/`$$` (querySelector shorthands), `esc()` (HTML-escape — **always escape

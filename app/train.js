@@ -24,7 +24,7 @@ async function renderTrainStart(){
     +(nd?'':`<p class="sm muted">This plan has no training days yet — add one below.</p>`)
     +days
     +`<div class="btnrow" style="margin-top:6px;grid-template-columns:1fr 1fr 1fr"><button class="btn ghost sm" data-addday style="width:100%">+ Add day</button><button class="btn ghost sm" id="gymBtn" style="width:100%">🎒 My gym</button><button class="btn ghost sm" id="libBtn" style="width:100%">📚 Exercises</button></div>`;
-  renderWeekCard(workouts);
+  renderWeekCard(workouts);renderAdaptCard('#trainAdapt');
 }
 /* This week: sessions vs plan, hard sets by region, tonnage; last-4-weeks by muscle behind a disclosure. */
 function renderWeekCard(workouts){
@@ -47,13 +47,14 @@ async function setActivePlan(id){await idbPut('kv',{k:'activePlan',v:id});await 
 function planLibraryModal(){
   const draw=()=>{$('#plList').innerHTML=PLANS.map(p=>{const on=p.id===PROG.id;const nd=Object.keys(p.days||{}).length;
     return `<div class="entry${on?' on':''}" role="button" tabindex="0" data-plan="${esc(p.id)}"><div><div class="n">${esc(p.name)}${on?' <span class="badge">Active</span>':''}</div><div class="s">${nd} day${nd===1?'':'s'} · ${esc(p.source||'custom')}${p.description?' · '+esc(p.description):''}</div></div>
-      <div class="row" style="gap:6px"><button class="pillbtn" data-planren="${esc(p.id)}" aria-label="Rename">✎</button><button class="pillbtn" data-plandup="${esc(p.id)}" aria-label="Duplicate">⧉</button>${!on&&PLANS.length>1?`<button class="pillbtn" data-plandel="${esc(p.id)}" aria-label="Delete">✕</button>`:''}</div></div>`;}).join('');};
+      <div class="row" style="gap:6px"><button class="pillbtn" data-planshare="${esc(p.id)}" aria-label="Share">⇪</button><button class="pillbtn" data-planren="${esc(p.id)}" aria-label="Rename">✎</button><button class="pillbtn" data-plandup="${esc(p.id)}" aria-label="Duplicate">⧉</button>${!on&&PLANS.length>1?`<button class="pillbtn" data-plandel="${esc(p.id)}" aria-label="Delete">✕</button>`:''}</div></div>`;}).join('');};
   openModal(`<div class="mh"><h3>Workout plans</h3><button class="x" onclick="closeModal()">✕</button></div>
    <p class="sm muted" style="margin:0 0 10px">Tap a plan to make it active. Your logged sessions always stay yours, whichever plan they came from.</p>
    <div id="plList"></div>
    <button class="btn sec" id="plNew" style="margin-top:12px;width:100%">+ New empty plan</button>`);
   draw();
   $('#plList').onclick=async e=>{
+    const shp=e.target.closest('[data-planshare]');if(shp){closeModal();sharePlanModal(shp.dataset.planshare);return;}
     const ren=e.target.closest('[data-planren]');if(ren){const p=PLANS.find(x=>x.id===ren.dataset.planren);const n=prompt('Plan name',p.name);if(n&&n.trim()){p.name=n.trim();await idbPut('plans',p);draw();renderTrainStart();}return;}
     const dup=e.target.closest('[data-plandup]');if(dup){const p=PLANS.find(x=>x.id===dup.dataset.plandup);const c=JSON.parse(JSON.stringify(p));c.id='plan-'+uid();c.name=p.name+' (copy)';c.source='custom';c.createdAt=Date.now();delete c.up;delete c.sharedFrom;await idbPut('plans',c);await loadProgram();draw();toast('Plan duplicated');return;}
     const del=e.target.closest('[data-plandel]');if(del){if(!confirm('Delete this plan? Logged sessions are kept.'))return;await idbDel('plans',del.dataset.plandel);await loadProgram();draw();renderTrainStart();return;}
@@ -174,7 +175,7 @@ async function saveEquip(){
   if((EQUIP.bars||[]).length)EQUIP.barKg=Math.max(...EQUIP.bars.map(b=>b.kg));
   EQUIP.dbMaxKg=(EQUIP.dumbbells||[]).length?Math.max(...EQUIP.dumbbells):0;
   await idbPut('kv',{k:'equipment',v:EQUIP});
-  renderGym();renderCoach();
+  renderGym();renderCoach();renderAdaptCard('#gymAdapt');
 }
 async function renderWorkoutHistory(){
   const list=(await idbGetAll('workouts')).sort((a,b)=>a.date<b.date?1:(a.date>b.date?-1:b.ts-a.ts));

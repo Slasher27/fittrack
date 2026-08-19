@@ -42,6 +42,11 @@
   </div>
 </div>
 
+<!-- ONBOARDING / PROFILE (full screen) -->
+<div class="view hidden" id="view-onboard">
+  <div id="obBody"></div>
+</div>
+
 <!-- COACH -->
 <div class="view hidden" id="view-coach">
   <div class="row between" style="align-items:center"><h2 class="vt" style="margin-bottom:0">Coach</h2><button class="pillbtn" id="coachClearBtn" aria-label="Clear conversation">Clear</button></div>
@@ -147,6 +152,7 @@
   <div id="trainStart">
     <div class="btnrow" id="dayBtns" style="grid-template-columns:1fr"></div>
   </div>
+  <div id="trainAdapt" style="margin-top:8px"></div>
   <div id="trainWeek" style="margin-top:14px"></div>
   <h3 style="font-size:15px;margin:22px 0 8px">History</h3>
   <div id="workoutHistory"></div>
@@ -178,6 +184,7 @@
     <button class="pillbtn" id="gymBack" aria-label="Back to Train">‹ Train</button>
   </div>
   <h2 class="vt">My Gym</h2>
+  <div id="gymAdapt"></div>
   <div id="gymBody"></div>
 </div>
 
@@ -226,6 +233,8 @@
       <input id="authEmail" type="email" autocomplete="username" inputmode="email" autocapitalize="off" spellcheck="false" required>
       <label class="fl" for="authPass">Password</label>
       <input id="authPass" type="password" autocomplete="current-password" required minlength="8">
+      <div id="authInviteWrap" class="hidden"><label class="fl" for="authInvite">Invite code</label>
+      <input id="authInvite" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="e.g. K7PXQ2MN"></div>
       <p class="auth-err" id="authErr" role="alert" aria-live="assertive"></p>
       <button class="btn" type="submit" id="authSubmit">Sign in</button>
     </form>
@@ -256,6 +265,8 @@
 <script src="app/train.js"></script>
 <script src="app/session.js"></script>
 <script src="app/coachai.js"></script>
+<script src="app/onboard.js"></script>
+<script src="app/share.js"></script>
 <script src="app/library.js"></script>
 <script src="app/settingsView.js"></script>
 <script src="app/events.js"></script>

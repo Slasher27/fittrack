@@ -61,14 +61,15 @@ async function coachContext(){
     coachInsights:fired.map(f=>`[${f.sev}] ${f.t} — ${f.b}`),
   };
 }
-const COACH_SYSTEM=`You are the coach inside FitTrack, a personal strength & nutrition app. You talk to ONE person: the app's user, whose live data is in the CONTEXT block of each message. Be a real coach: direct, specific, warm, evidence-based, brief. Use their actual numbers. No greetings, no sign-offs, no bullet-point essays — a few sentences, or a short list only when it genuinely helps. Metric units. You are not a doctor: for pain, injury or medical issues, briefly advise a professional.
+function coachSystem(){return `You are the coach inside FitTrack, a personal strength & nutrition app. You talk to ONE person: the app's user, whose live data is in the CONTEXT block of each message. Be a real coach: direct, specific, warm, evidence-based, brief. Use their actual numbers. No greetings, no sign-offs, no bullet-point essays — a few sentences, or a short list only when it genuinely helps. Metric units. You are not a doctor: for pain, injury or medical issues, briefly advise a professional.
 
 You can CHANGE things with tools. Every write tool shows the user a preview they must accept — so propose confidently, but call a tool only when the user asked for a change or clearly agreed to one you suggested. Never call a write tool just to demonstrate. Reads (exercise history, exercise search) are free — use them whenever a question is about a specific lift or you need to pick a substitute. Prefer exercises from the catalog (search first) that fit the user's equipment. Unilateral exercises are logged per side. When you replace a training day, send the COMPLETE exercise list for that day (the tool replaces it). Structured targets: sets + repsMin/repsMax (or amrap), or sets + secs for timed work, or rounds + items for circuits.
 
-If the user tells you what they ate, estimate sensible macros per item (state it's an estimate) and log it. If they say they bought or lost equipment, update the gym and offer to adapt affected exercises. Keep the reference plan below in mind as the baseline the user started from; their live data in CONTEXT is what is true today.
+If the user tells you what they ate, estimate sensible macros per item (state it's an estimate) and log it. If they say they bought or lost equipment, update the gym and offer to adapt affected exercises. Keep the reference below in mind as the baseline; their live data in CONTEXT is what is true today.
 
-REFERENCE PLAN (baseline):
-${typeof PLAN_CONTEXT!=='undefined'?PLAN_CONTEXT:''}`;
+${PROFILE?`USER PROFILE (from onboarding):
+${profileSummary(PROFILE)}`:`REFERENCE PLAN (baseline):
+${typeof PLAN_CONTEXT!=='undefined'?PLAN_CONTEXT:''}`}`;}
 
 /* ---------- tools ---------- */
 const COACH_TOOLS=[
@@ -152,7 +153,7 @@ async function coachLoop(){
     for(let hop=0;hop<6;hop++){
       // keep the transcript bounded; tool_use/result pairs must not be split, so trim on user boundaries
       while(CHAT_API.length>CHAT_MAX_TURNS){const i=CHAT_API.findIndex((m,ix)=>ix>0&&m.role==='user'&&typeof m.content==='string');if(i<1)break;CHAT_API.splice(0,i);}
-      const res=await coachRequest({kind:'chat',system:[{type:'text',text:COACH_SYSTEM,cache_control:{type:'ephemeral'}}],messages:CHAT_API,tools:COACH_TOOLS,max_tokens:4000});
+      const res=await coachRequest({kind:'chat',system:[{type:'text',text:coachSystem(),cache_control:{type:'ephemeral'}}],messages:CHAT_API,tools:COACH_TOOLS,max_tokens:4000});
       if(res.stop_reason==='refusal'){CHAT.push({role:'assistant',text:'I can’t help with that one.',ts:Date.now()});break;}
       const content=res.content||[];
       CHAT_API.push({role:'assistant',content});
@@ -189,6 +190,7 @@ async function renderCoachTab(){
   $('#coachTop').innerHTML=`<div class="card" style="margin-bottom:10px"><div class="xs muted" style="letter-spacing:.06em;text-transform:uppercase">Today · ${wd}</div>
     <div class="sm" style="margin-top:2px">${dk&&PROG.days[dk]?`Training day: <b>${esc(PROG.days[dk].title.split('—')[0].trim())}</b> — ${esc((PROG.days[dk].title.split('—')[1]||'').trim())}`:'Rest day — eat to target, walk, sleep.'}</div>
     ${fired.length?`<div style="margin-top:8px">${fired.slice(0,3).map(f=>`<div class="insight ${f.sev}"><div><div class="n">${f.t}</div><div class="s">${f.b}</div></div></div>`).join('')}</div>`:'<div class="sm muted" style="margin-top:6px">Nothing to flag right now — keep going.</div>'}
+    ${PROFILE?'':`<div class="row between" style="margin-top:10px;gap:10px"><div class="sm"><b>Tell the coach about you</b><div class="xs muted">Age, goal, kit, food — 2 minutes; then it can build and adapt your plan.</div></div><button class="btn sm" data-obstart>Set up</button></div>`}
     <div class="xs muted" style="margin-top:8px">${coachAvailable()?'Ask the coach anything below — it sees your data and can change your plan (you approve every change).':navigator.onLine?'Sign in (Settings → Account) or add an API key to chat with the coach.':'Offline — chat unavailable; everything else works.'}</div></div>`;
   renderChat();
 }

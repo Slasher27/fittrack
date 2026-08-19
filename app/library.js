@@ -93,3 +93,32 @@ async function paintLibDetail(id){
     ${alts.length?`<div class="sm" style="margin-top:8px"><b>${miss.length?'Swap for:':'Alternatives:'}</b> ${alts.map(a=>`<button class="chip${exAvailable(a)?'':' dim'}" data-libgo="${esc(a.id)}">${esc(a.name)}</button>`).join(' ')}</div>`:''}
   </div>`;
 }
+
+/* ---------- Adaptation: kit changed → which plan exercises no longer fit, and what to swap in ----------
+   Deterministic (catalog alternatives that fit the remaining kit) so it works offline; the coach
+   is one tap away for judgement calls. Shown on My gym and on Train whenever something is off. */
+function planAffected(){
+  const out=[];
+  for(const[k,d]of Object.entries(PROG.days||{}))d.ex.forEach((e,i)=>{const c=exFind(e.name);if(c&&!exAvailable(c)){const alt=exAlternatives(c,6).find(a=>exAvailable(a))||null;out.push({dayKey:k,idx:i,ex:e,cat:c,missing:exMissing(c),alt});}});
+  return out;
+}
+function renderAdaptCard(targetSel){
+  const el=$(targetSel);if(!el)return;
+  const aff=planAffected();
+  if(!aff.length){el.innerHTML='';return;}
+  el.innerHTML=`<div class="card" style="border-color:var(--danger)"><b>Your plan needs kit you don’t have</b>
+    <ul class="sm" style="margin:6px 0 0 16px">${aff.map(a=>`<li><b>${esc(a.ex.name)}</b> <span class="muted">(Day ${esc(a.dayKey)}, needs ${esc(a.missing.join(', '))})</span>${a.alt?` → <b>${esc(a.alt.name)}</b>`:' → no fitting alternative found'}</li>`).join('')}</ul>
+    <div class="btnrow" style="margin-top:10px"><button class="btn sm" data-adaptapply ${aff.some(a=>a.alt)?'':'disabled'}>Apply swaps</button><button class="btn ghost sm" data-adaptcoach>Ask the coach</button></div></div>`;
+}
+async function applyAdaptSwaps(){
+  const aff=planAffected().filter(a=>a.alt);if(!aff.length)return;
+  const lines=aff.map(a=>`${a.ex.name} → ${a.alt.name}`);
+  if(!confirm(`Swap ${aff.length} exercise${aff.length>1?'s':''} for what your gym can do?\n\n${lines.join('\n')}\n\nSets, reps and rest are kept.`))return;
+  for(const a of aff){const e=PROG.days[a.dayKey].ex[a.idx];e.name=a.alt.name;e.perSide=a.alt.unilateral;if(a.alt.metric==='time'&&e.mode==='reps'){e.mode='time';e.tgt={sets:e.tgt?.sets||8,secs:40};}e.target=targetLabel(e.tgt,e.perSide?sideWord(a.alt):false);}
+  await saveProgram();toast('Plan adapted to your kit');
+  renderAdaptCard('#gymAdapt');renderAdaptCard('#trainAdapt');if(typeof renderTrainStart==='function')renderTrainStart();
+}
+function askCoachAboutKit(){
+  const aff=planAffected();
+  coachOpenWith(aff.length?`My gym changed. These exercises need kit I don't have: ${aff.map(a=>`${a.ex.name} (Day ${a.dayKey})`).join(', ')}. Please suggest the best substitutes for my equipment and update the plan.`:'My gym just changed — please look at my equipment and suggest any exercises I should add or upgrade in my plan.');
+}

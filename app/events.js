@@ -17,10 +17,11 @@ function go(view){
   if(view==='photos')renderPhotos();
   if(view==='train'){renderTrainStart();renderWorkoutHistory();}
   if(view==='plan')renderPlan();
-  if(view==='gym')renderGym();
+  if(view==='gym'){renderGym();renderAdaptCard('#gymAdapt');}
   if(view==='library')renderLibrary();
   if(view==='exhist')renderExHist();
   if(view==='coach')renderCoachTab();
+  if(view==='onboard')renderOnboard();
 }
 
 /* ---------- global events ---------- */
@@ -68,6 +69,13 @@ document.addEventListener('click',async e=>{
   if(t.closest('#libBack')){go('train');return;}
   if(t.closest('#sesBack')){go('train');return;}
   if(t.closest('#exhBack')){if(exhistFrom==='session'&&SES){go('session');}else go(exhistFrom&&exhistFrom!=='exhist'?exhistFrom:'train');return;}
+  if(t.closest('[data-adaptapply]')){applyAdaptSwaps();return;}
+  if(t.closest('[data-adaptcoach]')){askCoachAboutKit();return;}
+  const oc=t.closest('[data-obchip]');if(oc){obChip(oc.dataset.obchip,oc.dataset.val);return;}
+  if(t.closest('[data-obnext]')){obNext();return;}
+  if(t.closest('[data-obprev]')){obCollect();OB.step=Math.max(0,OB.step-1);renderOnboard();return;}
+  if(t.closest('[data-obcancel]')){go(PROFILE?'coach':'today');return;}
+  if(t.closest('[data-obstart]')){startOnboarding(!!PROFILE);return;}
   const cq=t.closest('[data-coachq]');if(cq){go('coach');coachSend(cq.dataset.coachq);return;}
   const cok=t.closest('[data-coachok]');if(cok){coachDecide(cok.dataset.coachok,'accept');return;}
   const cno=t.closest('[data-coachno]');if(cno){coachDecide(cno.dataset.coachno,'decline');return;}
