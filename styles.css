@@ -523,3 +523,9 @@ body.session-mode .view{padding-bottom:40px}
 .obbar i.on{background:var(--volt)}
 #view-onboard .chips{margin-top:4px}
 #view-onboard .chip.on{background:var(--volt);color:var(--volt-ink);border-color:var(--volt)}
+
+/* describe-to-log */
+.dtlcard{margin-bottom:14px}
+.dtlcard .dtl .entry{padding:8px 0}
+.dtl select{width:auto;padding:4px 8px}
+.dtlrow input{display:inline-block;font-size:13px}

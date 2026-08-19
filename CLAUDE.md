@@ -68,6 +68,7 @@ fittrack/
 │   ├── coachai.js      ← the AI Coach tab: context snapshot, tools (read auto / write → preview → accept), client-side agent loop, chat UI.
 │   ├── onboard.js      ← profile (kv `profile`, synced), 6-step onboarding, Mifflin-St Jeor targets, AI plan generation (forced create_plan tool + validation).
 │   ├── share.js        ← invites (codes, QR/link, sign-up pre-check) and plan sharing by email (plan_shares snapshot → import copy).
+│   ├── foodai.js       ← describe-to-log on Home (forced parse_food tool → editable preview → log, estimates flagged), recipes (per-100 g cooked), foodPer100().
 ├── supabase/functions/coach/index.ts ← the ONLY server code: Edge Function proxy to Claude (holds the key, verifies session, daily quota).
 │   ├── util.js seed.js plan.js settings.js qr.js model.js coach.js today.js
 │   │   food.js body.js train.js settingsView.js events.js
@@ -381,6 +382,21 @@ it (first user exempt). **Sharing**: `sharePlanModal()` inserts a
 during onboarding/session) offers unclaimed shares → import as
 `source:'shared'` copy with `sharedFrom`, kit issues flagged, row PATCHed
 `claimed_at`.
+
+### 4.10 Food v3 (`app/foodai.js`)
+**Describe-to-log** (the Home screen's first card): `describeToLog(text)` →
+`coachRequest({kind:'food', tool_choice: parse_food})` with a system prompt
+that includes the user's own custom foods/recipes (per 100 g) so their
+numbers are reused → `dtlState` → `renderDtl()` editable preview (kcal/protein
+per line, remove, meal select, "save as a food") → **Log it** writes `log`
+rows with `estimated:true` (and, for saved lines, a custom food stored **per
+100 g** when grams are known). Offline / no coach → falls back to the Food
+library search with the text. **Recipes**: `recipeModal()` — weight-based
+ingredients (grams) + cooked weight → a custom food `{kind:'recipe',
+serving:'100 g', ingredients, cookedG}` with per-100 g cooked macros, so the
+normal grams flow logs "220 g of …"; listed under the *Recipes* group with ✎.
+`foodPer100(f)` derives per-100 g macros for any weight/volume food. Food
+groups outside the fixed order now render too. Nav label is **Home**.
 
 ### 4.7 Helpers & utilities
 `$`/`$$` (querySelector shorthands), `esc()` (HTML-escape — **always escape

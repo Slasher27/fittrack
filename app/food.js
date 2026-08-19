@@ -26,7 +26,7 @@ async function renderFood(){
   }
   let foods=await idbGetAll('foods');
   if(foodSeg==='mine')foods=foods.filter(f=>f.custom);
-  const foodRow=f=>`<div class="foodrow" role="button" tabindex="0" data-logfood="${f.id}"><div><div class="fn">${esc(f.name)}</div><div class="fs">${esc(f.serving)} · ${rnd(f.protein)}P ${rnd(f.carbs)}C ${rnd(f.fat)}F</div></div><div class="row" style="gap:7px"><div class="fk">${rnd(f.kcal)}<br>kcal</div>${f.custom?`<button class="pillbtn" data-delfood="${f.id}" title="Delete food">✕</button>`:''}<span class="chev">›</span></div></div>`;
+  const foodRow=f=>`<div class="foodrow" role="button" tabindex="0" data-logfood="${f.id}"><div><div class="fn">${esc(f.name)}${f.kind==='recipe'?' <span class="badge">recipe</span>':''}${f.estimated?' <span class="xs muted">· est.</span>':''}</div><div class="fs">${esc(f.serving)} · ${rnd(f.protein)}P ${rnd(f.carbs)}C ${rnd(f.fat)}F</div></div><div class="row" style="gap:7px"><div class="fk">${rnd(f.kcal)}<br>kcal</div>${f.custom?`<button class="pillbtn" data-delfood="${f.id}" title="Delete food">✕</button>`:''}<span class="chev">›</span></div></div>${f.kind==='recipe'?`<button class="pillbtn" data-editrecipe="${f.id}" aria-label="Edit recipe">✎</button>`:''}`;
   // frequent foods (last 14 days of the log), library segment only, hidden while searching
   let recent='';
   if(foodSeg==='library'&&!q){
@@ -43,7 +43,7 @@ async function renderFood(){
   if(!foods.length){root.innerHTML=`<div class="empty"><span class="ic">🍽️</span>${foodSeg==='mine'?'No custom foods yet. Tap “Custom food”.':'No matches in your library.'}</div>`+offBtn;return;}
   const groups={};foods.forEach(f=>{(groups[f.group]=groups[f.group]||[]).push(f);});
   const gorder=['Protein','Dairy','Carbs','Fruit','Veg','Fats','Other','Online'];
-  let h=recent;for(const g of gorder){if(!groups[g])continue;h+=`<div class="grp">${g}</div>`;
+  let h=recent;for(const g of [...gorder,...Object.keys(groups).filter(g=>!gorder.includes(g)).sort()]){if(!groups[g])continue;h+=`<div class="grp">${esc(g)}</div>`;
     groups[g].forEach(f=>{h+=foodRow(f);});}
   if(stale())return;
   root.innerHTML=h+offBtn;

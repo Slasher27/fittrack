@@ -37,6 +37,7 @@ document.addEventListener('click',async e=>{
   const df=t.closest('[data-delfood]');if(df){if(confirm('Delete this food?')){await idbDel('foods',df.dataset.delfood);renderFood();}return;}
   const dm=t.closest('[data-delmeal]');if(dm){if(confirm('Delete this meal?')){await idbDel('meals',dm.dataset.delmeal);renderFood();}return;}
   const em=t.closest('[data-editmeal]');if(em){buildMealModal(em.dataset.editmeal);return;}
+  const er=t.closest('[data-editrecipe]');if(er){recipeModal(er.dataset.editrecipe);return;}
   const lf=t.closest('[data-logfood]');if(lf){logFoodModal(lf.dataset.logfood);return;}
   const lm=t.closest('[data-logmeal]');if(lm){logMealModal(lm.dataset.logmeal);return;}
   const dl=t.closest('[data-dellog]');if(dl){await idbDel('log',dl.dataset.dellog);renderToday();return;}
@@ -113,6 +114,7 @@ document.addEventListener('click',async e=>{
   if(t.closest('#aiAsk')){askPlan();return;}
   if(t.closest('#gearBtn')){settingsModal();return;}
   if(t.closest('#addFoodBtn')){addFoodModal();return;}
+  if(t.closest('#addRecipeBtn')){recipeModal();return;}
   if(t.closest('#addMealBtn')){buildMealModal();return;}
   if(t.closest('#addMeasureBtn')){addMeasureModal();return;}
   if(t.closest('#addPhotoBtn')){addPhotoModal();return;}
@@ -139,4 +141,5 @@ $('#prevDay').onclick=()=>{const d=parseD(curDate);d.setDate(d.getDate()-1);curD
 $('#nextDay').onclick=()=>{const d=parseD(curDate);d.setDate(d.getDate()+1);curDate=dstr(d);renderToday();};
 window.closeModal=closeModal;
 $('#coachForm').addEventListener('submit',e=>{e.preventDefault();coachSend($('#coachInput').value);});
+$('#dtlForm').addEventListener('submit',e=>{e.preventDefault();describeToLog($('#dtlInput').value);});
 

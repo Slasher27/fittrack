@@ -230,7 +230,7 @@ architecture lands; update it then.
 | 3 | ~~Train rebuilt: full-screen logger, per-metric rows, in-set history, PBs, per-exercise history, rollups~~ **shipped 2026-08-18** (+ flat visual rules applied app-wide: shadows/blur/glow removed) | "no stats / PBs" fixed |
 | 4 | ~~Edge Function AI proxy + Coach tab (chat, previews, tools: program / meal plan / targets / log / food)~~ **shipped 2026-08-18** (meal-plan editing lands with the food model in stage 6) | "where do I ask?" fixed |
 | 5 | ~~Onboarding conversation + generation + validation; equipment / profile-change adaptation; **plan sharing** (share, import + equipment check, update prompt) + invite codes~~ **shipped 2026-08-19** (the "plan you follow was updated" prompt is not built — shares are snapshots) | your original prompt, in-app; invite flow complete; train together |
-| 6 | Food: per-100 g model, describe-to-log, recipes; then bundled DB + barcode | food friction fixed |
+| 6 | ~~Food: per-100 g model, describe-to-log, recipes~~ **shipped 2026-08-19** (per-100 g derived via `foodPer100`, storage stays per-serving; bundled DB + barcode still later) | food friction fixed |
 | 7 | **Weekly review**; Home + Coach → Progress polish; photos to Storage; metering | coach keeps users on track; ready for more invitees |
 
 Steps 1–3 are mostly deterministic and can be verified headless; 4–6 need

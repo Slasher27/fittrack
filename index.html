@@ -68,6 +68,13 @@
 
   <div class="tgrid">
     <div class="tcol-a">
+      <div class="card dtlcard">
+        <form id="dtlForm" autocomplete="off">
+          <label class="fl" for="dtlInput" style="margin-top:0">What did you eat or drink?</label>
+          <div class="row" style="gap:6px"><input id="dtlInput" placeholder="e.g. 2 eggs, toast with butter, flat white" enterkeyhint="send"><button class="btn sm" type="submit" id="dtlGo" style="flex:none">Log</button></div>
+        </form>
+        <div id="dtlOut"></div>
+      </div>
       <div id="todayNext"></div>
       <div class="card">
         <div class="cal-wrap">
@@ -112,6 +119,7 @@
   <input class="search" id="foodSearch" placeholder="Search foods…">
   <div class="btnrow" style="margin-bottom:12px">
     <button class="btn sec sm" id="addFoodBtn" style="width:100%">+ Custom food</button>
+    <button class="btn sec sm" id="addRecipeBtn" style="width:100%">+ Recipe</button>
     <button class="btn sec sm" id="addMealBtn" style="width:100%">+ Build a meal</button>
   </div>
   <div id="foodList"></div>
@@ -216,7 +224,7 @@
 <!-- NAV -->
 <div class="nav" role="navigation" aria-label="Main">
   <button data-nav="coach"><svg><use href="#i-coach"/></svg><span class="nl">Coach</span></button>
-  <button data-nav="today" class="on"><svg><use href="#i-home"/></svg><span class="nl">Today</span></button>
+  <button data-nav="today" class="on"><svg><use href="#i-home"/></svg><span class="nl">Home</span></button>
   <button data-nav="food"><svg><use href="#i-food"/></svg><span class="nl">Food</span></button>
   <button data-nav="body"><svg><use href="#i-ruler"/></svg><span class="nl">Weight</span></button>
   <button data-nav="train"><svg><use href="#i-dumbbell"/></svg><span class="nl">Train</span></button>
@@ -267,6 +275,7 @@
 <script src="app/coachai.js"></script>
 <script src="app/onboard.js"></script>
 <script src="app/share.js"></script>
+<script src="app/foodai.js"></script>
 <script src="app/library.js"></script>
 <script src="app/settingsView.js"></script>
 <script src="app/events.js"></script>
