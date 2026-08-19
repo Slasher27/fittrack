@@ -39,7 +39,7 @@ async function coachRequest(payload){
 /* ---------- context the coach sees ---------- */
 async function firedInsights(){
   const s=await computeStats();const dis=(await idbGet('kv','insightDismissals'))?.v||{};const fired=[];
-  for(const r of INSIGHT_RULES){let res;try{res=r.check(s);}catch(e){continue;}if(!res)continue;const d=dis[r.id];if(d&&(parseD(todayStr())-parseD(d))/864e5<r.cd)continue;fired.push({id:r.id,sev:r.sev,t:res.t,b:res.b.replace(/<[^>]+>/g,'')});}
+  for(const r of INSIGHT_RULES){let res;try{res=r.check(s);}catch(e){continue;}if(!res)continue;const d=dis[r.id];if(d&&(parseD(todayStr())-parseD(d))/864e5<r.cd)continue;fired.push({id:r.id,sev:r.sev,t:res.t,b:res.b.replace(/<br\s*\/?>/gi,' · ').replace(/<[^>]+>/g,'')});}
   return{stats:s,fired};
 }
 async function coachContext(){
