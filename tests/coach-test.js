@@ -1,0 +1,97 @@
+const {chromium}=require('playwright');const APP='http://localhost:8099/index.html';const SB='https://mock.supabase.co';
+let pass=0,fail=0;const ok=(c,m)=>{if(c){pass++;console.log('  ✓',m);}else{fail++;console.log('  ✗',m);}};
+const reqs=[];let script=[];
+function nextScripted(){return script.length?script.shift():{content:[{type:'text',text:'(no script)'}],stop_reason:'end_turn'};}
+(async()=>{
+ const b=await chromium.launch();const ctx=await b.newContext({viewport:{width:390,height:844},serviceWorkers:'block'});const p=await ctx.newPage();const errs=[];
+ p.on('pageerror',e=>errs.push(e.message));p.on('console',m=>{if(m.type()==='error'&&!/Failed to load resource/.test(m.text()))errs.push(m.text());});
+ await p.route('**/app/config.js',r=>r.fulfill({contentType:'application/javascript',body:`export const CONFIG={supabaseUrl:'${SB}',supabaseKey:'k'};`}));
+ await p.route(SB+'/**',route=>{const req=route.request();const path=new URL(req.url()).pathname;const json=(s,b)=>route.fulfill({status:s,contentType:'application/json',body:JSON.stringify(b)});
+  if(path.startsWith('/auth/v1/token'))return json(200,{access_token:'acc1',refresh_token:'r1',expires_in:3600,user:{id:'u1',email:'a@x.com'}});
+  if(path.startsWith('/rest/v1/plan_shares'))return json(200,[]);if(path.startsWith('/rest/v1/records'))return json(req.method()==='POST'?201:200,[]);
+  if(path==='/functions/v1/coach'){const body=req.postDataJSON();reqs.push({headers:req.headers(),body});const r=nextScripted();return json(r.status||200,r.status?{error:r.error}:r);}
+  return json(404,{});});
+ await p.goto(APP);await p.waitForSelector('#view-auth:not(.hidden)');await p.fill('#authEmail','a@x.com');await p.fill('#authPass','password123');await p.click('#authSubmit');await p.waitForSelector('body[data-ready="1"]');
+ const wt=n=>p.waitForTimeout(n);
+ console.log('A. tab + shell');
+ ok(await p.$('.nav [data-nav="coach"]'),'Coach in the nav');ok(!(await p.$('.nav [data-nav="photos"]')),'Photos out of the nav');
+ await p.click('.nav [data-nav="coach"]');await wt(400);
+ ok(await p.evaluate(()=>curView==='coach'&&!document.querySelector('#view-coach').classList.contains('hidden')),'coach view opens');
+ ok((await p.textContent('#coachTop')).includes('Today'),'daily note rendered');
+ ok(await p.$('#coachChat [data-coachq]'),'quick prompts shown on empty chat');
+ console.log('B. plain answer');
+ script=[{content:[{type:'text',text:'You are **on track**: 1 of 3 sessions done.'}],stop_reason:'end_turn',usage:{}}];
+ await p.fill('#coachInput','How am I doing?');await p.click('#coachSendBtn');await wt(600);
+ ok(reqs.length===1,'one request sent');
+ const r1=reqs[0];
+ ok(r1.headers.authorization==='Bearer acc1'&&r1.headers.apikey==='k','edge function called with session token + apikey');
+ ok(Array.isArray(r1.body.system)&&r1.body.system[0].cache_control&&r1.body.tools.length===11,'system (cached) + 11 tools');
+ const lastUser=r1.body.messages[r1.body.messages.length-1];
+ ok(lastUser.role==='user'&&/CONTEXT \(live data, JSON\)/.test(lastUser.content)&&/USER: How am I doing\?/.test(lastUser.content),'context + user text in the last message');
+ const ctxJson=JSON.parse(lastUser.content.split('\n')[1]);
+ ok(ctxJson.plan&&ctxJson.plan.days.A&&ctxJson.targets.kcal===2150&&ctxJson.equipment.kettlebells.length===5,'context has plan, targets, equipment');
+ ok((await p.textContent('#coachChat')).includes('on track')&&await p.$('#coachChat .msg.ai b'),'answer rendered with markdown-lite');
+ console.log('C. write tool → preview → accept');
+ script=[{content:[{type:'text',text:'Sure — swapping.'},{type:'tool_use',id:'t1',name:'swap_exercise',input:{dayKey:'B',from:'Barbell Row',to:'KB Row',reason:'No barbell today'}}],stop_reason:'tool_use'},
+         {content:[{type:'text',text:'Done — KB Row is in Day B.'}],stop_reason:'end_turn'}];
+ await p.fill('#coachInput','swap barbell row for kb row');await p.click('#coachSendBtn');await wt(600);
+ ok(await p.$('#coachChat .msg.tool.pending [data-coachok="t1"]'),'preview card with Accept shown');
+ ok((await p.textContent('#coachChat .msg.tool.pending')).includes('Swap Barbell Row → KB Row'),'preview describes the swap');
+ ok(await p.evaluate(()=>PROG.days.B.ex.some(e=>e.name==='Barbell Row')),'plan unchanged before accept');
+ ok(reqs.length===2,'loop paused waiting for the user (no second request yet)');
+ await p.click('[data-coachok="t1"]');await wt(600);
+ ok(await p.evaluate(()=>PROG.days.B.ex.some(e=>e.name==='KB Row')&&!PROG.days.B.ex.some(e=>e.name==='Barbell Row')),'plan updated on accept');
+ ok(await p.evaluate(()=>idbGet('plans','plan-default').then(pl=>pl.days.B.ex.some(e=>e.name==='KB Row')&&pl.up>0)),'persisted + stamped');
+ ok(reqs.length===3,'tool_result sent back');
+ const tr=reqs[2].body.messages;const last=tr[tr.length-1];
+ ok(last.role==='user'&&Array.isArray(last.content)&&last.content[0].type==='tool_result'&&last.content[0].tool_use_id==='t1'&&/Swapped/.test(last.content[0].content),'tool_result content: '+last.content[0].content);
+ ok(tr[tr.length-2].role==='assistant'&&tr[tr.length-2].content.some(c=>c.type==='tool_use'),'assistant tool_use turn preserved');
+ ok((await p.textContent('#coachChat')).includes('Done — KB Row')&&(await p.textContent('#coachChat .msg.tool.applied')).includes('Applied'),'follow-up + Applied badge');
+ console.log('D. write tool → discard');
+ script=[{content:[{type:'tool_use',id:'t2',name:'log_food',input:{meal:'lunch',items:[{name:'Chicken wrap',kcal:600,protein:35,carbs:55,fat:22}]}}],stop_reason:'tool_use'},
+         {content:[{type:'text',text:'No problem — what did you have instead?'}],stop_reason:'end_turn'}];
+ await p.fill('#coachInput','I ate a chicken wrap');await p.click('#coachSendBtn');await wt(600);
+ ok((await p.textContent('#coachChat .msg.tool.pending')).includes('600 kcal'),'food preview');
+ await p.click('[data-coachno="t2"]');await wt(600);
+ ok(await p.evaluate(()=>idbGetAll('log').then(a=>a.length===0)),'nothing logged on discard');
+ const d=reqs[reqs.length-1].body.messages;ok(/declined/.test(d[d.length-1].content[0].content),'declined tool_result sent');
+ ok((await p.textContent('#coachChat .msg.tool.declined')).includes('Discarded'),'Discarded badge');
+ console.log('E. read tool runs automatically');
+ script=[{content:[{type:'tool_use',id:'t3',name:'get_exercise_history',input:{name:'Back Squat'}}],stop_reason:'tool_use'},
+         {content:[{type:'text',text:'No squat sessions logged yet.'}],stop_reason:'end_turn'}];
+ await p.fill('#coachInput',"how's my squat");await p.click('#coachSendBtn');await wt(800);
+ const e=reqs[reqs.length-1].body.messages;const et=e[e.length-1].content[0];
+ ok(et.type==='tool_result'&&et.tool_use_id==='t3'&&JSON.parse(et.content).exercise==='Back Squat','history returned as tool_result without asking');
+ ok((await p.textContent('#coachChat')).includes('Looked up Back Squat'),'read shown as a system line');
+ console.log('F. accept a full training-day replacement + log food');
+ script=[{content:[{type:'tool_use',id:'t4',name:'update_training_day',input:{dayKey:'D',title:'Day D — Arms (Sat)',reason:'You asked for an arm day',exercises:[{name:'EZ-bar Curl',sets:3,repsMin:10,repsMax:12,rest:60},{name:'Concentration Curl',sets:2,repsMin:12},{name:'Plank',secs:45,sets:3},{name:'Core finisher',rounds:2,items:[{name:'Dead Bug',reps:10,perSide:true},{name:'Plank',secs:30}]}]}}],stop_reason:'tool_use'},
+         {content:[{type:'text',text:'Added Day D.'}],stop_reason:'end_turn'}];
+ await p.fill('#coachInput','make me an arm day');await p.click('#coachSendBtn');await wt(600);
+ ok((await p.textContent('#coachChat .msg.tool.pending')).includes('Concentration Curl')&&(await p.textContent('#coachChat .msg.tool.pending')).includes('per arm'),'preview lists exercises with per-arm label');
+ await p.click('[data-coachok="t4"]');await wt(600);
+ const dD=await p.evaluate(()=>PROG.days.D);
+ ok(dD&&dD.ex.length===4&&dD.ex[0].target==='3 × 10–12'&&dD.ex[1].target==='2 × 12 per arm'&&dD.ex[2].mode==='time'&&dD.ex[3].mode==='rounds'&&dD.ex[3].items.length===2,'day D built with structured targets: '+JSON.stringify(dD&&dD.ex.map(x=>x.target)));
+ script=[{content:[{type:'tool_use',id:'t5',name:'log_food',input:{meal:'snack',items:[{name:'Banana',grams:120,kcal:105,protein:1,carbs:27,fat:0}]}}],stop_reason:'tool_use'},{content:[{type:'text',text:'Logged.'}],stop_reason:'end_turn'}];
+ await p.fill('#coachInput','banana');await p.click('#coachSendBtn');await wt(500);await p.click('[data-coachok="t5"]');await wt(500);
+ ok(await p.evaluate(()=>idbGetAll('log').then(a=>a.length===1&&a[0].estimated===true&&a[0].kcal===105&&a[0].meal==='snack')),'food logged as an estimate');
+ console.log('G. errors + persistence + fallback path');
+ script=[{status:429,error:'Daily coach limit reached (60).'}];
+ await p.fill('#coachInput','hi');await p.click('#coachSendBtn');await wt(500);
+ ok((await p.textContent('#coachChat .msg.err')).includes('Daily coach limit'),'server error surfaced in chat');
+ await p.reload();await p.waitForSelector('body[data-ready="1"]');await p.click('.nav [data-nav="coach"]');await wt(400);
+ ok((await p.textContent('#coachChat')).includes('KB Row is in Day B'),'conversation persisted across reload');
+ // offline-only + own key → direct Anthropic call
+ await p.route('https://api.anthropic.com/**',route=>{const body=route.request().postDataJSON();reqs.push({direct:true,body});route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({content:[{type:'text',text:'direct ok'}],stop_reason:'end_turn'})});});
+ const ctx2=await b.newContext({viewport:{width:390,height:844},serviceWorkers:'block'});const p2=await ctx2.newPage();
+ await p2.route('**/app/config.js',r=>r.fulfill({contentType:'application/javascript',body:`export const CONFIG={supabaseUrl:'${SB}',supabaseKey:'k'};`}));
+ await p2.route('https://api.anthropic.com/**',route=>{const body=route.request().postDataJSON();reqs.push({direct:true,body,h:route.request().headers()});route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({content:[{type:'text',text:'direct ok'}],stop_reason:'end_turn'})});});
+ await p2.goto(APP);await p2.waitForSelector('#view-auth:not(.hidden)');await p2.click('#authSkip');await p2.waitForSelector('body[data-ready="1"]');
+ await p2.click('.nav [data-nav="coach"]');await p2.waitForTimeout(300);
+ ok((await p2.textContent('#coachTop')).includes('Sign in'),'not signed in, no key → coach explains');
+ await p2.evaluate(async()=>{SET.aiKey='sk-ant-test';await saveSettings();});
+ await p2.fill('#coachInput','hello');await p2.click('#coachSendBtn');await p2.waitForTimeout(600);
+ const dr=reqs.find(r=>r.direct);ok(dr&&dr.h['x-api-key']==='sk-ant-test'&&dr.body.model==='claude-opus-5'&&dr.body.tools.length===11,'own-key path calls Anthropic directly with tools');
+ ok((await p2.textContent('#coachChat')).includes('direct ok'),'direct answer rendered');
+ ok(!errs.length,'no console errors '+JSON.stringify(errs));
+ await b.close();console.log(`\n${pass} passed, ${fail} failed`);process.exit(fail?1:0);
+})().catch(e=>{console.error(e);process.exit(1);});
