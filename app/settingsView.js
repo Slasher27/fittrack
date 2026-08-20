@@ -16,7 +16,8 @@ function settingsModal(){
    <label class="fl">Account</label>
    ${authUser()?`<div class="row between"><div><b>${esc(authUser().email||'')}</b><div class="xs muted" id="sbStatus">Checking…</div></div><button class="btn sec sm" id="sbSyncNow">Sync now</button></div>
    <div class="btnrow" style="margin-top:8px"><button class="btn sec sm" id="sbInvite">Invite someone</button><button class="btn ghost sm" id="sbSignOut">Sign out of this device</button></div>
-   <p class="xs muted" style="margin:6px 0 0">Your food, meals, measurements, workouts and program sync to your account automatically — sign in on any device to get them. Photos stay on this device for now.</p>`
+   <p class="xs muted" style="margin:6px 0 0">Your food, meals, measurements, workouts, photos and program sync to your account automatically — sign in on any device to get them.</p>
+   <p class="xs muted" id="sbUsage" style="margin:4px 0 0">Coach usage: checking…</p>`
    :`<div class="row between"><div><b>Not signed in</b><div class="xs muted">Data stays on this device only</div></div><button class="btn sec sm" id="sbSignIn">Sign in</button></div>
    <p class="xs muted" style="margin:6px 0 0">Sign in (or create an account) to back up this device and use the same data on your phone, tablet and desktop. Everything already logged here comes with you.</p>`}
    <label class="fl">AI assistant key (optional)</label>
@@ -57,6 +58,7 @@ function settingsModal(){
   const si=$('#sbSignIn');if(si)si.onclick=()=>{closeModal();appShowAuth();};
   $('#stProfile').onclick=()=>{closeModal();startOnboarding(!!PROFILE);};
   lastSyncTime().then(t=>{const el=$('#sbStatus');if(el)el.textContent=t?'Last synced '+new Date(t).toLocaleString():'Not synced yet';});
+  if($('#sbUsage'))coachUsageText().then(t=>{const el=$('#sbUsage');if(el)el.textContent=t;});
   if($('#sbSyncNow'))$('#sbSyncNow').onclick=async()=>{
     if(!navigator.onLine)return toast('You are offline');
     $('#sbStatus').textContent='Syncing…';
@@ -108,3 +110,15 @@ async function importData(e){const file=e.target.files[0];if(!file)return;try{co
   for(const p of d.photos||[])await idbPut('photos',{...p,blob:typeof p.blob==='string'?b64ToBlob(p.blob):p.blob});
   await loadSettings();await loadProgram();closeModal();toast('Backup restored');go('today');}catch(err){toast('Could not read file');}}
 
+
+/* Coach usage this month (ai_usage, RLS lets you read your own rows) — cost visibility before inviting more people. */
+async function coachUsageText(){
+  if(!authSignedIn()||!navigator.onLine)return 'Coach usage: sign in + online to see';
+  try{const d=new Date();const from=new Date(d.getFullYear(),d.getMonth(),1).toISOString();
+    const res=await sb('/rest/v1/ai_usage?select=input_tokens,output_tokens,cache_read&at=gte.'+encodeURIComponent(from));
+    if(!res.ok)return 'Coach usage: unavailable ('+res.status+')';
+    const rows=await res.json();const inTok=rows.reduce((s,r)=>s+(r.input_tokens||0),0),outTok=rows.reduce((s,r)=>s+(r.output_tokens||0),0),cached=rows.reduce((s,r)=>s+(r.cache_read||0),0);
+    const usd=(inTok/1e6)*5+(outTok/1e6)*25+(cached/1e6)*0.5; // Opus 5 list prices; cache reads ~10% of input
+    return `Coach usage this month: ${rows.length} request${rows.length===1?'':'s'} · ~${Math.round((inTok+outTok+cached)/1000)}k tokens · ≈ $${usd.toFixed(2)}`;}
+  catch{return 'Coach usage: unavailable';}
+}

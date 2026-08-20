@@ -79,7 +79,7 @@ async function renderPhotos(){
   const grid=$('#photoGrid');
   if(!list.length){grid.innerHTML=`<div class="empty"><span class="ic">📷</span>No photos yet.</div>`;return;}
   grid.className='pgrid';
-  grid.innerHTML=list.map(p=>{const url=URL.createObjectURL(p.blob);return `<div class="pcell" role="button" tabindex="0" data-photo="${p.id}"><img src="${url}" alt="${esc(p.category||'Progress')} photo, ${niceDate(p.date)}"><span class="tag2">${esc(p.category||'')}</span><span class="cap">${niceDate(p.date)}</span></div>`;}).join('');
+  grid.innerHTML=list.map(p=>{if(!p.blob)return `<div class="pcell pending" aria-label="Photo syncing"><span class="tag2">${esc(p.category||'')}</span><span class="cap">${niceDate(p.date)} · syncing…</span></div>`;const url=URL.createObjectURL(p.blob);return `<div class="pcell" role="button" tabindex="0" data-photo="${p.id}"><img src="${url}" alt="${esc(p.category||'Progress')} photo, ${niceDate(p.date)}"><span class="tag2">${esc(p.category||'')}</span><span class="cap">${niceDate(p.date)}</span></div>`;}).join('');
 }
 function addPhotoModal(){
   openModal(`<div class="mh"><h3>Add progress photo</h3><button class="x" onclick="closeModal()">✕</button></div>
@@ -96,7 +96,7 @@ function addPhotoModal(){
 }
 function compressImage(file){return new Promise(res=>{const img=new Image();img.onload=()=>{const max=1280;let{width:w,height:h}=img;if(w>h&&w>max){h=h*max/w;w=max;}else if(h>max){w=w*max/h;h=max;}
   const cv=document.createElement('canvas');cv.width=w;cv.height=h;cv.getContext('2d').drawImage(img,0,0,w,h);cv.toBlob(b=>res(b||file),'image/jpeg',0.82);};img.src=URL.createObjectURL(file);});}
-function viewPhotoModal(id){idbGet('photos',id).then(p=>{
+function viewPhotoModal(id){idbGet('photos',id).then(p=>{if(!p||!p.blob)return toast('Photo still syncing from your account');
   if(!p){toast('Photo no longer exists');renderPhotos();return;}
   const url=URL.createObjectURL(p.blob);
   openModal(`<div class="mh"><h3>${esc(p.category)} · ${niceDate(p.date)}</h3><button class="x" onclick="closeModal()">✕</button></div>

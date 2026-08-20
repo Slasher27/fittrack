@@ -529,3 +529,5 @@ body.session-mode .view{padding-bottom:40px}
 .dtlcard .dtl .entry{padding:8px 0}
 .dtl select{width:auto;padding:4px 8px}
 .dtlrow input{display:inline-block;font-size:13px}
+
+.pcell.pending{background:var(--soft);display:flex;align-items:center;justify-content:center;min-height:120px;color:var(--muted);font-size:12px}

@@ -9,7 +9,7 @@
    After applying pulled changes it dispatches `ft:synced` on `document` with
    {applied, kvApplied, exApplied} — the app decides what to reload/re-render. */
 import { idbGet, idbGetAll, idbPut, idbDel, SYNC_STORES, SYNCED_KV } from './db.js';
-import { signedIn, ensureToken, sb } from './auth.js';
+import { signedIn, ensureToken, sb, currentUser } from './auth.js';
 
 let syncTimer = null, syncBusy = false;
 export function syncReady() { return signedIn() && navigator.onLine; }
@@ -33,7 +33,7 @@ export async function syncNow() {
     const lastPush = st.lastPush || 0; const payload = []; let maxUp = lastPush;
     for (const store of SYNC_STORES) {
       for (const r of await idbGetAll(store))
-        if ((r.up || 0) > lastPush) { payload.push({ store, id: r.id, data: r, up: r.up, deleted: false }); maxUp = Math.max(maxUp, r.up); }
+        if ((r.up || 0) > lastPush) { payload.push({ store, id: r.id, data: store === 'photos' ? { ...r, blob: undefined } : r, up: r.up, deleted: false }); maxUp = Math.max(maxUp, r.up); } // a photo's image never goes in the row
     }
     for (const r of await idbGetAll('kv'))
       if (SYNCED_KV.has(r.k) && (r.up || 0) > lastPush) { payload.push({ store: 'kv', id: r.k, data: r, up: r.up, deleted: false }); maxUp = Math.max(maxUp, r.up); }
@@ -63,13 +63,39 @@ export async function syncNow() {
         if (!isKv && local && (local.up || 0) < row.up) { await idbDel(row.store, row.id, true); applied++; if (row.store === 'exercises') exApplied = true; if (row.store === 'plans') kvApplied = true; }
         continue;
       }
-      if (!local || (local.up || 0) < row.up) { await idbPut(row.store, row.data, true); applied++; if (isKv || row.store === 'plans') kvApplied = true; if (row.store === 'exercises') exApplied = true; }
+      if (!local || (local.up || 0) < row.up) {
+        const data = row.store === 'photos' && local && local.blob ? { ...row.data, blob: local.blob } : row.data; // keep the image we already have
+        await idbPut(row.store, data, true); applied++; if (isKv || row.store === 'plans') kvApplied = true; if (row.store === 'exercises') exApplied = true;
+      }
     }
+    await syncPhotoBlobs(); // upload new images, fetch missing ones (best effort, never blocks the sync result)
     st.lastSync = Date.now(); await idbPut('kv', st);
     document.dispatchEvent(new CustomEvent('ft:synced', { detail: { applied, kvApplied, exApplied } }));
     return applied;
   } finally { syncBusy = false; }
 }
+
+/* Photos: the image lives in Storage bucket `photos` at {uid}/{id}.jpg; the record syncs without it.
+   `remote:true` on the record tells other devices there is an image to fetch. */
+function photoPath(id) { const u = currentUser(); return u && u.uid ? `/storage/v1/object/photos/${u.uid}/${id}.jpg` : null; }
+export async function syncPhotoBlobs() {
+  try {
+    const photos = await idbGetAll('photos'); let n = 0;
+    for (const p of photos) {
+      const path = photoPath(p.id); if (!path) return;
+      if (p.blob && !p.remote) { // upload, then mark remote (stamped → meta re-pushes with remote:true)
+        const res = await sb(path, { method: 'POST', headers: { 'content-type': p.blob.type || 'image/jpeg', 'x-upsert': 'true' }, body: p.blob });
+        if (res.ok) await idbPut('photos', { ...p, remote: true });
+        if (++n >= 6) break;
+      } else if (!p.blob && p.remote) { // fetch the image another device uploaded
+        const res = await sb(path, { method: 'GET' });
+        if (res.ok) { const blob = await res.blob(); await idbPut('photos', { ...p, blob }, true); document.dispatchEvent(new CustomEvent('ft:photo', { detail: { id: p.id } })); }
+        if (++n >= 6) break;
+      }
+    }
+  } catch (e) { /* offline / bucket missing: try again next sync */ }
+}
+export async function deletePhotoRemote(id) { try { const path = photoPath(id); if (path) await sb(path, { method: 'DELETE' }); } catch {} }
 
 /* Reset push watermark — used after signing in on a device that already holds
    local data, so everything local is offered to the account once. */
@@ -83,4 +109,4 @@ window.addEventListener('pagehide', syncFlush);
 setInterval(() => { if (!document.hidden) syncRefresh(); }, 5 * 60 * 1000);
 
 // legacy bridge for classic scripts
-Object.assign(window, { syncNow, syncSoon, syncFlush, syncRefresh, syncReady, syncConfigured: syncReady, lastSyncTime });
+Object.assign(window, { syncNow, syncSoon, syncFlush, syncRefresh, syncReady, syncConfigured: syncReady, lastSyncTime, syncPhotoBlobs, deletePhotoRemote });

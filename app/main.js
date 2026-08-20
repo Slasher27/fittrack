@@ -122,6 +122,8 @@ document.addEventListener('ft:synced', async e => {
   if (d.applied && document.body.dataset.ready && !document.body.classList.contains('auth-mode')) window.go(window.curView);
 });
 
+document.addEventListener('ft:photo', () => { if (window.curView === 'photos') window.renderPhotos(); });
+
 // Sign out: push what's pending, end the session, wipe this device (no tombstones →
 // nothing cascades to other devices), and return to the gate.
 window.appSignOut = async function () {

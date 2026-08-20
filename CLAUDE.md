@@ -144,9 +144,11 @@ non-nav full-screen views: `#view-plan` (📖 Plan/help via `#helpBtn`),
 (the workout logger — a view, not a modal; `body.session-mode` hides the nav)**,
 `#view-exhist` (per-exercise history; `exhistFrom` remembers where to go back
 to, and peeking at it mid-session keeps the rest timer/wake lock alive), and
-`#view-auth` (sign-in gate). `#view-coach` is the first nav tab (Coach ·
-Today · Food · Weight · Train; Photos moved under Weight). **v3 rule: anything
-you *do* is a full screen; modals are for confirmations only.**
+`#view-auth` (sign-in gate). **The nav is Coach · Home · Train** (v3 stage 7);
+Food, Weight and Photos are full-screen views reached from Home (pills under
+the describe box), from Coach → Progress, or from each other, each with a
+‹ back pill. **v3 rule: anything you *do* is a full screen; modals are for
+confirmations only.**
 
 **`#view-plan` / AI assistant:** the user's original coaching document lives
 in-app as `PLAN_SECTIONS` (8 `<details>` accordions). The Ask box calls the
@@ -397,6 +399,27 @@ serving:'100 g', ingredients, cookedG}` with per-100 g cooked macros, so the
 normal grams flow logs "220 g of …"; listed under the *Recipes* group with ✎.
 `foodPer100(f)` derives per-100 g macros for any weight/volume food. Food
 groups outside the fixed order now render too. Nav label is **Home**.
+
+### 4.11 Weekly review, metering, photo sync (stage 7)
+**Weekly review** (`coachai.js`): `reviewDay()` (profile → `SET.reviewDay` →
+Sun), `reviewWeekKey()` = most recent review day on/before today;
+`reviewDue()` when kv `lastReview` ≠ that key and there is recent data. The
+Coach tab shows a *Run review* card → `runWeeklyReview()` = `coachSend(
+REVIEW_PROMPT, {kind:'review', effort:'high'})` through the normal loop (so
+proposed changes are preview/accept tool calls), then stores kv `lastReview`
+and appends to kv `reviews` (last 26). Context now carries last week's sets by
+muscle + PRs and `reviewDay`. Coach → **Progress** card summarises weight/
+trend, sessions/sets/PBs this week, kcal average, with links.
+**Metering**: Settings → Account → `coachUsageText()` reads own `ai_usage`
+rows for the month (requests, tokens, ≈ $ at Opus 5 list prices).
+**Photos** are now in `SYNC_STORES`: `sync.js` pushes the record **without the
+blob**; `syncPhotoBlobs()` (after every sync) uploads blobs that aren't
+`remote` yet to Storage `photos/{uid}/{id}.jpg` (then re-puts the record with
+`remote:true`, stamped, so the flag syncs) and downloads images for pulled
+records that have `remote` but no blob (≤6 per sync, `ft:photo` event
+re-renders). Deleting a photo also calls `deletePhotoRemote()`. Photos
+without a blob render as a "syncing…" tile; `viewPhotoModal` guards. Bucket +
+policy are in `supabase-schema.sql`.
 
 ### 4.7 Helpers & utilities
 `$`/`$$` (querySelector shorthands), `esc()` (HTML-escape — **always escape

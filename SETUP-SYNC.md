@@ -102,6 +102,15 @@ Re-run `supabase-schema.sql` once more (SQL Editor). It adds:
   import a copy into their library (their logs, targets and meals stay their
   own); kit they don't have is flagged and can be swapped in one tap.
 
+## 8. Progress photos in the cloud (v3 stage 7)
+
+Re-run `supabase-schema.sql` once more: it creates the private Storage bucket
+`photos` with a policy so each user can only touch `photos/{their-uid}/…`.
+From then on photos sync too — the metadata through `records`, the image
+through Storage — and a device you sign in on fetches them (a "syncing…" tile
+shows until the image arrives). Settings → Account also shows **coach usage
+this month** (requests, tokens, approximate cost) from `ai_usage`.
+
 ## Notes
 
 - **Conflicts:** last write wins per record. Deletes obey the same rule.

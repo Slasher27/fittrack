@@ -60,7 +60,7 @@ document.addEventListener('click',async e=>{
   const eme=t.closest('[data-editmeas]');if(eme){addMeasureModal(eme.dataset.editmeas);return;}
   const dme=t.closest('[data-delmeas]');if(dme){if(confirm('Delete measurement?')){await idbDel('measurements',dme.dataset.delmeas);renderBody();}return;}
   const ph=t.closest('[data-photo]');if(ph){viewPhotoModal(ph.dataset.photo);return;}
-  const dp=t.closest('[data-delphoto]');if(dp){await idbDel('photos',dp.dataset.delphoto);closeModal();renderPhotos();return;}
+  const dp=t.closest('[data-delphoto]');if(dp){await idbDel('photos',dp.dataset.delphoto);deletePhotoRemote(dp.dataset.delphoto);closeModal();renderPhotos();return;}
   const edd=t.closest('[data-editday]');if(edd){editDayModal(edd.dataset.editday);return;}
   if(t.closest('[data-addday]')){editDayModal(null);return;}
   if(t.closest('[data-planlib]')){planLibraryModal();return;}
@@ -77,6 +77,7 @@ document.addEventListener('click',async e=>{
   if(t.closest('[data-obprev]')){obCollect();OB.step=Math.max(0,OB.step-1);renderOnboard();return;}
   if(t.closest('[data-obcancel]')){go(PROFILE?'coach':'today');return;}
   if(t.closest('[data-obstart]')){startOnboarding(!!PROFILE);return;}
+  if(t.closest('[data-review]')){runWeeklyReview();return;}
   const cq=t.closest('[data-coachq]');if(cq){go('coach');coachSend(cq.dataset.coachq);return;}
   const cok=t.closest('[data-coachok]');if(cok){coachDecide(cok.dataset.coachok,'accept');return;}
   const cno=t.closest('[data-coachno]');if(cno){coachDecide(cno.dataset.coachno,'decline');return;}

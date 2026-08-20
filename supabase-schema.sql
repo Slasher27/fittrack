@@ -122,3 +122,11 @@ end $$;
 drop trigger if exists check_invite_trg on auth.users;
 create trigger check_invite_trg before insert on auth.users
   for each row execute function public.check_invite();
+
+-- v3 stage 7 (2026-08-19): progress photos in Storage. Each user's images live under
+-- photos/{user_id}/{photo_id}.jpg; the photo's metadata syncs through `records` like everything else.
+insert into storage.buckets (id, name, public) values ('photos', 'photos', false) on conflict (id) do nothing;
+drop policy if exists "photos own" on storage.objects;
+create policy "photos own" on storage.objects for all to authenticated
+  using (bucket_id = 'photos' and (storage.foldername(name))[1] = auth.uid()::text)
+  with check (bucket_id = 'photos' and (storage.foldername(name))[1] = auth.uid()::text);

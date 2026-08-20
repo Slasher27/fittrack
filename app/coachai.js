@@ -56,7 +56,8 @@ async function coachContext(){
     targets:SET.targets,startWeight:SET.startWeight,goalWeight:SET.goalWeight,
     weight:{latest:s.lastWeigh?{kg:s.lastWeigh.weight,date:s.lastWeigh.date}:null,trendKgPerWeek:s.trend!=null?+s.trend.toFixed(2):null,daysSinceWeighIn:s.sinceWeigh},
     food:{avgKcalLast7LoggedDays:s.kcal7!=null?rnd(s.kcal7):null,loggedDays:s.days7.length,lowProteinDays:s.protLow,today:{kcal:rnd(tk.kcal),protein:rnd(tk.protein),entries:foodToday.length},waterTodayMl:s.waterMl},
-    training:{thisWeek:{sessions:thisWk.sessions,plannedPerWeek:plannedPerWeek(),hardSets:thisWk.sets,setsByMuscle:thisWk.byMuscle,tonnageKg:rnd(thisWk.tonnage)},lastWeek:{sessions:lastWk.sessions,hardSets:lastWk.sets},missedThisWeek:s.missed,recentSessions:recent},
+    training:{thisWeek:{sessions:thisWk.sessions,plannedPerWeek:plannedPerWeek(),hardSets:thisWk.sets,setsByMuscle:thisWk.byMuscle,tonnageKg:rnd(thisWk.tonnage),prs:thisWk.prs},lastWeek:{sessions:lastWk.sessions,hardSets:lastWk.sets,setsByMuscle:lastWk.byMuscle,tonnageKg:rnd(lastWk.tonnage),prs:lastWk.prs},missedThisWeek:s.missed,recentSessions:recent},
+    reviewDay:reviewDay(),
     plan,equipment:eq,
     coachInsights:fired.map(f=>`[${f.sev}] ${f.t} — ${f.b}`),
   };
@@ -139,21 +140,44 @@ function previewFor(name,input){
 }
 
 /* ---------- the loop ---------- */
-async function coachSend(text){
+async function coachSend(text,opts={}){
   if(coachBusy)return;text=(text||'').trim();if(!text)return;
   const inp=$('#coachInput');if(inp)inp.value='';
-  CHAT.push({role:'user',text,ts:Date.now()});renderChat();
+  CHAT.push({role:'user',text:opts.label||text,ts:Date.now()});renderChat();
   const ctx=await coachContext();
   CHAT_API.push({role:'user',content:`CONTEXT (live data, JSON):\n${JSON.stringify(ctx)}\n\nUSER: ${text}`});
-  await coachLoop();
+  await coachLoop(opts);
 }
-async function coachLoop(){
+/* ---------- weekly review ---------- */
+function reviewDay(){return (PROFILE&&PROFILE.reviewDay)||SET.reviewDay||'Sun';}
+function reviewWeekKey(today){ // the most recent review day on/before today → that week's key
+  today=today||todayStr();const want=DAY_ORDER.indexOf(reviewDay());const d=parseD(today);
+  for(let i=0;i<7;i++){const x=new Date(d);x.setDate(d.getDate()-i);if((x.getDay()+6)%7===want)return dstr(x);}
+  return today;
+}
+async function reviewDue(){
+  const key=reviewWeekKey();const last=(await idbGet('kv','lastReview'))?.v;
+  if(last===key)return false;
+  const ws=await idbGetAll('workouts');const cut=addDays(todayStr(),-14);
+  return ws.some(w=>w.date>=cut)||(await idbGetAll('log')).some(e=>e.date>=cut);
+}
+const REVIEW_PROMPT=`It's weekly review time. Using CONTEXT (and get_exercise_history for my main lifts if it helps), give me my review in this order, tight and specific (about 150 words of text): 1) adherence — sessions vs planned, logged food days, water; 2) weight trend vs the pace my goal needs; 3) calories and protein vs targets; 4) training — hard sets per muscle vs 10–15, PBs, anything stalling; 5) the 2–4 most important changes for next week — and where a change is to my plan, targets or schedule, propose it with a tool so I can accept it. End with one line on what to focus on this week.`;
+async function runWeeklyReview(){
+  if(coachBusy)return;
+  await coachSend(REVIEW_PROMPT,{kind:'review',effort:'high',label:'📋 Weekly review'});
+  const key=reviewWeekKey();const last=[...CHAT].reverse().find(m=>m.role==='assistant'&&!m.err);
+  await idbPut('kv',{k:'lastReview',v:key});
+  const reviews=(await idbGet('kv','reviews'))?.v||[];reviews.push({week:key,at:Date.now(),text:last?last.text:''});
+  await idbPut('kv',{k:'reviews',v:reviews.slice(-26)});
+  renderCoachTab();
+}
+async function coachLoop(opts={}){
   coachBusy=true;renderChat();
   try{
     for(let hop=0;hop<6;hop++){
       // keep the transcript bounded; tool_use/result pairs must not be split, so trim on user boundaries
       while(CHAT_API.length>CHAT_MAX_TURNS){const i=CHAT_API.findIndex((m,ix)=>ix>0&&m.role==='user'&&typeof m.content==='string');if(i<1)break;CHAT_API.splice(0,i);}
-      const res=await coachRequest({kind:'chat',system:[{type:'text',text:coachSystem(),cache_control:{type:'ephemeral'}}],messages:CHAT_API,tools:COACH_TOOLS,max_tokens:4000});
+      const res=await coachRequest({kind:opts.kind||'chat',effort:opts.effort,system:[{type:'text',text:coachSystem(),cache_control:{type:'ephemeral'}}],messages:CHAT_API,tools:COACH_TOOLS,max_tokens:opts.kind==='review'?6000:4000});
       if(res.stop_reason==='refusal'){CHAT.push({role:'assistant',text:'I can’t help with that one.',ts:Date.now()});break;}
       const content=res.content||[];
       CHAT_API.push({role:'assistant',content});
@@ -187,7 +211,16 @@ async function renderCoachTab(){
   if(!CHAT.length){const saved=(await idbGet('kv','coachChat'))?.v;if(saved){CHAT=saved.chat||[];CHAT_API=saved.api||[];}}
   const{fired}=await firedInsights();
   const wd=DAY_ORDER[(parseD(todayStr()).getDay()+6)%7];const dk=PROG.schedule[wd];
-  $('#coachTop').innerHTML=`<div class="card" style="margin-bottom:10px"><div class="xs muted" style="letter-spacing:.06em;text-transform:uppercase">Today · ${wd}</div>
+  const due=await reviewDue();const{stats:st}=await firedInsights();
+  const wk=weeklyVolume(await idbGetAll('workouts'),1)[0];
+  const reviewCard=due?`<div class="card" style="margin-bottom:10px;border-color:var(--volt)"><div class="row between" style="gap:10px"><div><b>📋 Your weekly review is ready</b><div class="xs muted">Adherence, weight trend, food, training, and what to change next week. ${coachAvailable()?'':'Needs the coach online.'}</div></div><button class="btn sm" data-review ${coachAvailable()?'':'disabled'}>Run review</button></div></div>`:'';
+  const progress=`<div class="card" style="margin-bottom:10px"><div class="row between"><b>Progress</b><span class="xs muted">review day ${reviewDay()}</span></div>
+    <div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">
+      <span class="pill">⚖ ${st.lastWeigh?st.lastWeigh.weight+' kg':'no weigh-in'}${st.trend!=null?` · ${st.trend>0?'+':''}${st.trend.toFixed(1)} kg/wk`:''}</span>
+      <span class="pill">🏋️ ${wk.sessions}${plannedPerWeek()?'/'+plannedPerWeek():''} this week · ${wk.sets} sets${wk.prs?` · ${wk.prs} PB`:''}</span>
+      <span class="pill">🍽 ${st.kcal7!=null?rnd(st.kcal7)+' kcal avg':'no food logged'}</span></div>
+    <div class="row" style="gap:8px;margin-top:8px;flex-wrap:wrap"><button class="pillbtn" data-nav="body">Weight &amp; photos ›</button><button class="pillbtn" data-nav="train">Training ›</button><button class="pillbtn" data-nav="food">Food ›</button></div></div>`;
+  $('#coachTop').innerHTML=reviewCard+progress+`<div class="card" style="margin-bottom:10px"><div class="xs muted" style="letter-spacing:.06em;text-transform:uppercase">Today · ${wd}</div>
     <div class="sm" style="margin-top:2px">${dk&&PROG.days[dk]?`Training day: <b>${esc(PROG.days[dk].title.split('—')[0].trim())}</b> — ${esc((PROG.days[dk].title.split('—')[1]||'').trim())}`:'Rest day — eat to target, walk, sleep.'}</div>
     ${fired.length?`<div style="margin-top:8px">${fired.slice(0,3).map(f=>`<div class="insight ${f.sev}"><div><div class="n">${f.t}</div><div class="s">${f.b}</div></div></div>`).join('')}</div>`:'<div class="sm muted" style="margin-top:6px">Nothing to flag right now — keep going.</div>'}
     ${PROFILE?'':`<div class="row between" style="margin-top:10px;gap:10px"><div class="sm"><b>Tell the coach about you</b><div class="xs muted">Age, goal, kit, food — 2 minutes; then it can build and adapt your plan.</div></div><button class="btn sm" data-obstart>Set up</button></div>`}
