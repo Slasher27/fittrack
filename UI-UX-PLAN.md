@@ -1,5 +1,30 @@
 # FitTrack — UI/UX Enhancement Plan
 
+> ## 📌 Current status (2026-08-20)
+>
+> **The v3 rebuild is COMPLETE** — all 7 stages of [`V3-BRIEF.md`](V3-BRIEF.md)
+> plus meal-plan generation and voice input are shipped, tested and committed.
+> The app is: accounts + per-user sync (invite-only sign-up), AI coach with 11
+> preview/accept tools, onboarding → generated plans, 318-exercise library,
+> full-screen logger with PBs/history/volume, describe-to-log food + recipes,
+> weekly review, photo cloud sync, usage metering. Nav: Coach · Home · Train.
+> SW cache `fittrack-v22`. Supabase is fully configured (schema through stage 7,
+> `coach` Edge Function live with `ANTHROPIC_API_KEY` secret, photos bucket).
+>
+> **The user is now living with the app for a week (until ~2026-08-27) and will
+> return with a feedback list — that list is the next session's agenda.** Their
+> girlfriend may run the invite + onboarding flow for real; treat her
+> experience as first-class feedback.
+>
+> Backlog, in rough order, when feedback is quiet: bundled offline food DB;
+> barcode scanning; "shared plan was updated" prompt; **MuscleWiki exercise
+> videos at commercialisation** (decision + open questions in the 2026-08-20
+> log entry; prototype on their $10/mo dev tier via the edge-function pattern).
+>
+> Regression battery: **`tests/`** (13 Playwright suites, ~300 checks — see
+> `tests/README.md` for setup + mocking conventions). Serve with
+> `python -m http.server 8099`; bump the SW `CACHE` on every shipped change.
+
 Working plan for the UI/UX improvement effort. **Update this file at the end of
 every session:** tick off completed items, add notes/decisions to the Session
 log, and adjust priorities if they change.
@@ -9,7 +34,7 @@ Ground rules for all work (see CLAUDE.md for detail):
 - Stay vanilla HTML/CSS/JS, single-file (`index.html`), no build step, no
   dependencies. The app must remain an offline-first installable PWA.
 - Bump `CACHE` in `service-worker.js` with **every** shipped change to cached
-  assets (currently `fittrack-v2`).
+  assets.
 - Bump `MEAL_SEED_VERSION` only if seed meals change.
 - New interactive elements use the delegated `data-*` click-handler pattern.
 - Keep it coherent with the existing design system (`:root` CSS variables,

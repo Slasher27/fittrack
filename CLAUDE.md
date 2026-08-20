@@ -110,10 +110,10 @@ python3 -m http.server 8099
 # then open http://localhost:8099/index.html
 ```
 
-There is no automated test suite in the repo. During development the app is
-verified by driving it with Playwright (headless Chromium): load the page,
-click through flows, and assert on DOM text + capture `pageerror`/`console`
-events. Key smoke flows: sign up / sign in at the gate, log a food, log a
+**The regression battery lives in [`tests/`](tests/)** — 13 Playwright
+(headless Chromium) suites, ~300 checks, driving the real app against mocked
+backends; `tests/README.md` has setup and the mocking conventions. Run the
+relevant suites after any change and add checks alongside new features. Key smoke flows: sign up / sign in at the gate, log a food, log a
 meal, add a measurement, log a workout, and confirm `#calRemain` / macro bars
 update with **no console errors**. Wait for `body[data-ready="1"]` before
 asserting. **Test harness rules learned:** (1) create the context with
@@ -533,10 +533,12 @@ After any deploy that changed cached files, remember §6 (bump `CACHE`).
 
 ## 10. Roadmap / good next enhancements
 
-> **Active UI/UX work is tracked in [`UI-UX-PLAN.md`](UI-UX-PLAN.md).** Read it
-> at the start of a session and update it (tick items, append to the session
-> log) at the end of each session. The list below is the longer-term product
-> roadmap.
+> **Read [`UI-UX-PLAN.md`](UI-UX-PLAN.md) at the start of every session** — its
+> "Current status" block says exactly where things stand and what's next — and
+> update it (status block + session log) at the end of each session.
+> [`V3-BRIEF.md`](V3-BRIEF.md) is the product spec (all 7 build stages shipped
+> as of 2026-08-20); the list below is the original v1 roadmap, kept for
+> history — most of it is done or superseded.
 
 Ideas discussed with the user, roughly in priority order:
 
