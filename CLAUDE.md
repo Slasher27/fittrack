@@ -340,7 +340,10 @@ fired coach insights) is prepended to the user text; the request carries the
 frozen `COACH_SYSTEM` (with `cache_control`) and `COACH_TOOLS`. **Read tools**
 (`get_exercise_history`, `search_exercises`) run immediately; **write tools**
 (`update_training_day`, `swap_exercise`, `update_schedule`, `log_food`,
-`log_water`, `log_weight`, `update_targets`, `update_equipment`) render a
+`log_water`, `log_weight`, `update_targets`, `update_meal_plan` — replaces
+whole days' meals: known foods reused by exact name at the given grams,
+unknown items become custom per-100 g foods, replaced meals are `custom` so
+reseeds never clobber them — and `update_equipment`) render a
 preview card via `previewFor()` and the loop *pauses* on a promise until the
 user taps Accept (→ `apply()` → `tool_result` "applied…") or Discard (→
 `tool_result` "user declined…"). Tool inputs become structured targets through

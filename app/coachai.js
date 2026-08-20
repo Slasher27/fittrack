@@ -49,6 +49,8 @@ async function coachContext(){
   const recent=sortedWorkouts(workouts).slice(-3).map(w=>({date:w.date,day:w.title.split('—')[0].trim(),sets:sessionSummary(w).sets,prs:(w.prs||[]).map(p=>p.name+': '+p.text)}));
   const plan={name:PROG.name,schedule:PROG.schedule,days:Object.fromEntries(Object.entries(PROG.days).map(([k,d])=>[k,{title:d.title,exercises:d.ex.map(e=>({name:e.name,target:exTargetText(e),rest:e.rest,mode:e.mode,items:e.items?itemsLabel(e.items):undefined}))}]))};
   const eq={bars:(EQUIP.bars||[]).map(b=>`${b.name} ${b.kg}kg`),plates:(EQUIP.plates||[]).map(p=>`${p.n}×${p.kg}`),dumbbells:EQUIP.dumbbells,kettlebells:EQUIP.kettlebells,bands:EQUIP.bands,gear:EQUIP.gear};
+  const mealsAll=await idbGetAll('meals');const fmapAll=foodMap(await idbGetAll('foods'));
+  const mealPlan={};for(const m of mealsAll){if(!m.day||!m.slot)continue;const t=await mealMacros(m,fmapAll);(mealPlan[m.day]=mealPlan[m.day]||[]).push(`${m.slot}: ${m.name} (${rnd(t.kcal)} kcal, P${rnd(t.protein)})`);}
   const foodToday=await idbByDate('log',todayStr());
   const tk=foodToday.reduce((t,e)=>({kcal:t.kcal+e.kcal,protein:t.protein+e.protein}),{kcal:0,protein:0});
   return{
@@ -58,7 +60,7 @@ async function coachContext(){
     food:{avgKcalLast7LoggedDays:s.kcal7!=null?rnd(s.kcal7):null,loggedDays:s.days7.length,lowProteinDays:s.protLow,today:{kcal:rnd(tk.kcal),protein:rnd(tk.protein),entries:foodToday.length},waterTodayMl:s.waterMl},
     training:{thisWeek:{sessions:thisWk.sessions,plannedPerWeek:plannedPerWeek(),hardSets:thisWk.sets,setsByMuscle:thisWk.byMuscle,tonnageKg:rnd(thisWk.tonnage),prs:thisWk.prs},lastWeek:{sessions:lastWk.sessions,hardSets:lastWk.sets,setsByMuscle:lastWk.byMuscle,tonnageKg:rnd(lastWk.tonnage),prs:lastWk.prs},missedThisWeek:s.missed,recentSessions:recent},
     reviewDay:reviewDay(),
-    plan,equipment:eq,
+    plan,equipment:eq,mealPlan,
     coachInsights:fired.map(f=>`[${f.sev}] ${f.t} — ${f.b}`),
   };
 }
@@ -66,7 +68,7 @@ function coachSystem(){return `You are the coach inside FitTrack, a personal str
 
 You can CHANGE things with tools. Every write tool shows the user a preview they must accept — so propose confidently, but call a tool only when the user asked for a change or clearly agreed to one you suggested. Never call a write tool just to demonstrate. Reads (exercise history, exercise search) are free — use them whenever a question is about a specific lift or you need to pick a substitute. Prefer exercises from the catalog (search first) that fit the user's equipment. Unilateral exercises are logged per side. When you replace a training day, send the COMPLETE exercise list for that day (the tool replaces it). Structured targets: sets + repsMin/repsMax (or amrap), or sets + secs for timed work, or rounds + items for circuits.
 
-If the user tells you what they ate, estimate sensible macros per item (state it's an estimate) and log it. If they say they bought or lost equipment, update the gym and offer to adapt affected exercises. Keep the reference below in mind as the baseline; their live data in CONTEXT is what is true today.
+If the user tells you what they ate, estimate sensible macros per item (state it's an estimate) and log it. When rewriting their meal plan (update_meal_plan), keep each day within ~5% of the calorie target, protein at or above target, respect every dislike/restriction/rule, reuse their saved foods and recipes by exact name, and give grams for weight-based items (macros are for that amount). If they say they bought or lost equipment, update the gym and offer to adapt affected exercises. Keep the reference below in mind as the baseline; their live data in CONTEXT is what is true today.
 
 ${PROFILE?`USER PROFILE (from onboarding):
 ${profileSummary(PROFILE)}`:`REFERENCE PLAN (baseline):
@@ -83,6 +85,7 @@ const COACH_TOOLS=[
  {name:'log_water',description:'Add water in ml for today. Preview → accept.',input_schema:{type:'object',properties:{ml:{type:'integer'}},required:['ml']}},
  {name:'log_weight',description:'Record a bodyweight (and optionally waist) measurement. Preview → accept.',input_schema:{type:'object',properties:{kg:{type:'number'},waistCm:{type:'number'},date:{type:'string'}},required:['kg']}},
  {name:'update_targets',description:'Change daily calorie/macro targets. Preview → accept.',input_schema:{type:'object',properties:{kcal:{type:'integer'},protein:{type:'integer'},carbs:{type:'integer'},fat:{type:'integer'},kcalTrain:{type:'integer',description:'training-day calories (optional)'},reason:{type:'string'}},required:['reason']}},
+ {name:'update_meal_plan',description:'Replace the meal plan for one or more days. Each meal lists items with grams and macros for that amount. The user previews and accepts. Honour their diet profile (dislikes, restrictions, rules) and calorie/protein targets; reuse their saved foods/recipes where the names match.',input_schema:{type:'object',properties:{days:{type:'array',items:{type:'object',properties:{day:{type:'string',enum:['Mon','Tue','Wed','Thu','Fri','Sat','Sun']},meals:{type:'array',items:{type:'object',properties:{slot:{type:'string',enum:['Breakfast','Lunch','Snack','Dinner']},name:{type:'string'},items:{type:'array',items:{type:'object',properties:{name:{type:'string'},grams:{type:'number'},count:{type:'string',description:'for countables, e.g. "3 eggs" — leave grams for weight foods'},kcal:{type:'number'},protein:{type:'number'},carbs:{type:'number'},fat:{type:'number'}},required:['name','kcal','protein','carbs','fat']}}},required:['slot','name','items']}}},required:['day','meals']}},reason:{type:'string'}},required:['days','reason']}},
  {name:'update_equipment',description:'Change the user\'s gym inventory. Provide only the categories that change; each replaces that category. Preview → accept.',input_schema:{type:'object',properties:{dumbbells:{type:'array',items:{type:'number'}},kettlebells:{type:'array',items:{type:'number'}},bands:{type:'array',items:{type:'string'}},gear:{type:'array',items:{type:'string'}},barKg:{type:'number'},plates:{type:'array',items:{type:'object',properties:{kg:{type:'number'},n:{type:'integer'}},required:['kg','n']}},reason:{type:'string'}},required:['reason']}},
 ];
 const READ_TOOLS=new Set(['get_exercise_history','search_exercises']);
@@ -133,6 +136,36 @@ function previewFor(name,input){
   if(name==='update_targets'){const T={...SET.targets};['kcal','protein','carbs','fat','kcalTrain'].forEach(k=>{if(input[k]!=null)T[k]=+input[k];});
     return{title:'Update daily targets',html:`<p class="sm">${esc(input.reason||'')}</p><div class="sm">${T.kcal} kcal · P ${T.protein} g · C ${T.carbs} g · F ${T.fat} g${T.kcalTrain?` · training days ${T.kcalTrain} kcal`:''}</div><div class="xs muted">was ${SET.targets.kcal} kcal · P ${SET.targets.protein} · C ${SET.targets.carbs} · F ${SET.targets.fat}</div>`,
       apply:async()=>{SET.targets=T;await saveSettings();$('#calTarget').textContent=SET.targets.kcal;renderToday();return'Targets updated';}};}
+  if(name==='update_meal_plan'){
+    const days=input.days||[];
+    const dayHtml=days.map(d=>{const meals=(d.meals||[]);return `<div style="margin-top:6px"><b>${esc(DAY_FULL[d.day]||d.day)}</b>${meals.map(m=>{const t=m.items.reduce((x,i)=>({k:x.k+(+i.kcal||0),p:x.p+(+i.protein||0)}),{k:0,p:0});
+      return `<div class="sm" style="margin-left:8px"><b>${esc(m.slot)}:</b> ${esc(m.name)} <span class="muted">— ${rnd(t.k)} kcal · P ${rnd(t.p)}</span><br><span class="xs muted">${m.items.map(i=>esc(i.name)+(i.grams?` ${i.grams} g`:i.count?` (${esc(i.count)})`:'')).join(' · ')}</span></div>`;}).join('')}</div>`;}).join('');
+    const totals=days.map(d=>{const t=(d.meals||[]).flatMap(m=>m.items).reduce((x,i)=>({k:x.k+(+i.kcal||0),p:x.p+(+i.protein||0)}),{k:0,p:0});return `${d.day} ${rnd(t.k)} kcal / P ${rnd(t.p)}`;}).join(' · ');
+    return{title:`New meal plan for ${days.length} day${days.length>1?'s':''}`,html:`<p class="sm">${esc(input.reason||'')}</p>${dayHtml}<div class="xs muted" style="margin-top:6px">Daily totals: ${esc(totals)}</div>`,
+      apply:async()=>{
+        const foods=await idbGetAll('foods');
+        const byName=n=>foods.find(f=>f.name.toLowerCase()===String(n).toLowerCase());
+        const existing=await idbGetAll('meals');
+        for(const d of days){
+          const slots=new Set((d.meals||[]).map(m=>m.slot));
+          for(const old of existing)if(old.day===d.day&&slots.has(old.slot))await idbDel('meals',old.id);
+          for(const m of d.meals||[]){
+            const items=[];
+            for(const it of m.items){
+              let f=byName(it.name);
+              if(f&&it.grams&&servingUnit(f.serving)){items.push({foodId:f.id,servings:it.grams/servingUnit(f.serving).base});continue;}
+              if(f&&!it.grams){items.push({foodId:f.id,servings:1});continue;}
+              // unknown item → create a custom food (per 100 g when grams known, else 1 serving)
+              const nf={id:uid(),name:it.name,group:'Mine',serving:'1 serving',kcal:rnd(it.kcal),protein:rnd(it.protein),carbs:rnd(it.carbs),fat:rnd(it.fat),custom:true,estimated:true};
+              if(it.grams){const k=100/it.grams;Object.assign(nf,{serving:'100 g',kcal:rnd(it.kcal*k),protein:rnd(it.protein*k),carbs:rnd(it.carbs*k),fat:rnd(it.fat*k)});}
+              await idbPut('foods',nf);foods.push(nf);
+              items.push({foodId:nf.id,servings:it.grams?it.grams/100:1});
+            }
+            await idbPut('meals',{id:uid(),day:d.day,slot:m.slot,name:m.name,items,custom:true});
+          }
+        }
+        if(typeof renderToday==='function')renderToday();
+        return `Meal plan replaced for ${days.map(d=>d.day).join(', ')} (${days.reduce((n,d)=>n+(d.meals||[]).length,0)} meals). New items were saved as foods.`;}};}
   if(name==='update_equipment'){const ch=[];for(const k of ['dumbbells','kettlebells','bands','gear','plates','barKg'])if(input[k]!=null)ch.push(`<b>${k}</b>: ${Array.isArray(input[k])?input[k].map(x=>typeof x==='object'?`${x.n}×${x.kg}`:x).join(', '):input[k]}`);
     return{title:'Update my gym',html:`<p class="sm">${esc(input.reason||'')}</p><div class="sm">${ch.join('<br>')||'no changes'}</div>`,
       apply:async()=>{for(const k of ['dumbbells','kettlebells','bands','gear','plates'])if(input[k]!=null)EQUIP[k]=input[k];if(input.barKg!=null){EQUIP.barKg=+input.barKg;EQUIP.bars=[{name:'Barbell',kg:+input.barKg}];}await saveEquip();return'Gym updated';}};}
@@ -229,7 +262,7 @@ async function renderCoachTab(){
 }
 function renderChat(){
   const el=$('#coachChat');if(!el)return;
-  const quick=['How am I doing this week?','What should I focus on today?','I ate something not on the plan','Swap an exercise for me','Bought new equipment'];
+  const quick=['How am I doing this week?','What should I focus on today?','I ate something not on the plan','Swap an exercise for me','Rework my meal plan','Bought new equipment'];
   el.innerHTML=(CHAT.length?CHAT.map(m=>{
     if(m.role==='user')return`<div class="msg me">${esc(m.text)}</div>`;
     if(m.role==='assistant')return`<div class="msg ai${m.err?' err':''}">${mdLite(m.text)}</div>`;

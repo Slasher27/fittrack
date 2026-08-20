@@ -143,4 +143,22 @@ $('#nextDay').onclick=()=>{const d=parseD(curDate);d.setDate(d.getDate()+1);curD
 window.closeModal=closeModal;
 $('#coachForm').addEventListener('submit',e=>{e.preventDefault();coachSend($('#coachInput').value);});
 $('#dtlForm').addEventListener('submit',e=>{e.preventDefault();describeToLog($('#dtlInput').value);});
+/* Voice input: Web Speech API where the browser has it (Chrome/Android, Safari 17+); buttons stay hidden elsewhere. */
+(function(){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR)return;
+  const wire=(btnId,inputId,onDone)=>{const btn=$('#'+btnId);if(!btn)return;btn.classList.remove('hidden');
+    let rec=null;
+    btn.onclick=()=>{
+      if(rec){try{rec.stop();}catch{}return;}
+      rec=new SR();rec.lang=navigator.language||'en-ZA';rec.interimResults=true;
+      const input=$('#'+inputId);const base=input.value?input.value+' ':'';
+      btn.classList.add('rec');btn.textContent='◼';
+      rec.onresult=e=>{let t='';for(const r of e.results)t+=r[0].transcript;input.value=base+t;};
+      rec.onerror=()=>{};
+      rec.onend=()=>{btn.classList.remove('rec');btn.textContent='🎙';rec=null;if(onDone&&input.value.trim())onDone(input.value);};
+      try{rec.start();}catch{rec=null;btn.classList.remove('rec');btn.textContent='🎙';}
+    };};
+  wire('coachMic','coachInput',null);
+  wire('dtlMic','dtlInput',null);
+})();
 

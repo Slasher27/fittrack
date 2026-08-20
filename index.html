@@ -54,6 +54,7 @@
   <div id="coachChat" class="chat"></div>
   <form id="coachForm" class="chatbar" autocomplete="off">
     <input id="coachInput" placeholder="Ask, log, or change something…" aria-label="Message the coach" enterkeyhint="send">
+    <button class="btn ghost micbtn hidden" type="button" id="coachMic" aria-label="Dictate">🎙</button>
     <button class="btn" type="submit" id="coachSendBtn" aria-label="Send">Send</button>
   </form>
 </div>
@@ -71,7 +72,7 @@
       <div class="card dtlcard">
         <form id="dtlForm" autocomplete="off">
           <label class="fl" for="dtlInput" style="margin-top:0">What did you eat or drink?</label>
-          <div class="row" style="gap:6px"><input id="dtlInput" placeholder="e.g. 2 eggs, toast with butter, flat white" enterkeyhint="send"><button class="btn sm" type="submit" id="dtlGo" style="flex:none">Log</button></div>
+          <div class="row" style="gap:6px"><input id="dtlInput" placeholder="e.g. 2 eggs, toast with butter, flat white" enterkeyhint="send"><button class="btn ghost sm micbtn hidden" type="button" id="dtlMic" aria-label="Dictate" style="flex:none">🎙</button><button class="btn sm" type="submit" id="dtlGo" style="flex:none">Log</button></div>
         </form>
         <div id="dtlOut"></div>
         <div class="row" style="gap:8px;margin-top:10px;flex-wrap:wrap"><button class="pillbtn" data-nav="food">🍽 Food library ›</button><button class="pillbtn" data-nav="body">⚖ Weight &amp; photos ›</button></div>

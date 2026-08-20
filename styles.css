@@ -531,3 +531,6 @@ body.session-mode .view{padding-bottom:40px}
 .dtlrow input{display:inline-block;font-size:13px}
 
 .pcell.pending{background:var(--soft);display:flex;align-items:center;justify-content:center;min-height:120px;color:var(--muted);font-size:12px}
+
+.micbtn{min-height:44px;padding:0 12px;width:auto;flex:none}
+.micbtn.rec{background:var(--danger-soft);color:var(--danger);border-color:var(--danger)}
