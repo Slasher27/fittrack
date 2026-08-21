@@ -204,9 +204,31 @@ async function runWeeklyReview(){
   await idbPut('kv',{k:'reviews',v:reviews.slice(-26)});
   renderCoachTab();
 }
+// Every assistant tool_use must be answered by a tool_result in the very next
+// message or the API 400s the whole transcript forever. An interrupted loop
+// (error mid-tool, tab killed while a preview waited) can persist an orphan —
+// heal it with a synthetic "interrupted" result instead of losing the chat.
+function sanitizeApi(){
+  // a trimmed/sliced transcript may start mid-pair (tool_results whose tool_use
+  // was cut off) — drop to the first plain user turn, which is always a string
+  while(CHAT_API.length&&!(CHAT_API[0].role==='user'&&typeof CHAT_API[0].content==='string'))CHAT_API.shift();
+  for(let i=0;i<CHAT_API.length;i++){
+    const m=CHAT_API[i];
+    if(m.role!=='assistant'||!Array.isArray(m.content))continue;
+    const uses=m.content.filter(b=>b.type==='tool_use');
+    if(!uses.length)continue;
+    const next=CHAT_API[i+1];
+    const have=new Set(next&&next.role==='user'&&Array.isArray(next.content)?next.content.filter(b=>b.type==='tool_result').map(b=>b.tool_use_id):[]);
+    const fills=uses.filter(u=>!have.has(u.id)).map(u=>({type:'tool_result',tool_use_id:u.id,content:'Interrupted before this ran — it was NOT applied. Ask the user if they still want it.'}));
+    if(!fills.length)continue;
+    if(next&&next.role==='user'&&Array.isArray(next.content))next.content.unshift(...fills);
+    else CHAT_API.splice(i+1,0,{role:'user',content:fills});
+  }
+}
 async function coachLoop(opts={}){
   coachBusy=true;renderChat();
   try{
+    sanitizeApi();
     for(let hop=0;hop<6;hop++){
       // keep the transcript bounded; tool_use/result pairs must not be split, so trim on user boundaries
       while(CHAT_API.length>CHAT_MAX_TURNS){const i=CHAT_API.findIndex((m,ix)=>ix>0&&m.role==='user'&&typeof m.content==='string');if(i<1)break;CHAT_API.splice(0,i);}
@@ -235,7 +257,7 @@ async function coachLoop(opts={}){
       CHAT_API.push({role:'user',content:results});
     }
   }catch(e){CHAT.push({role:'assistant',text:'⚠️ '+e.message,ts:Date.now(),err:true});}
-  finally{coachBusy=false;await idbPut('kv',{k:'coachChat',v:{chat:CHAT.slice(-60),api:CHAT_API.slice(-CHAT_MAX_TURNS)}});renderChat();}
+  finally{coachBusy=false;sanitizeApi();await idbPut('kv',{k:'coachChat',v:{chat:CHAT.slice(-60),api:CHAT_API.slice(-CHAT_MAX_TURNS)}});renderChat();}
 }
 function coachDecide(id,decision){if(coachPending&&coachPending.id===id)coachPending.resolve(decision);}
 

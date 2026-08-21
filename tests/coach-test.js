@@ -80,6 +80,18 @@ function nextScripted(){return script.length?script.shift():{content:[{type:'tex
  ok((await p.textContent('#coachChat .msg.err')).includes('Daily coach limit'),'server error surfaced in chat');
  await p.reload();await p.waitForSelector('body[data-ready="1"]');await p.click('.nav [data-nav="coach"]');await wt(400);
  ok((await p.textContent('#coachChat')).includes('KB Row is in Day B'),'conversation persisted across reload');
+ console.log('H. orphaned tool_use in saved transcript is healed');
+ await p.evaluate(async()=>{await idbPut('kv',{k:'coachChat',v:{chat:[{role:'user',text:'swap something',ts:1}],api:[
+  {role:'user',content:'CONTEXT (live data, JSON):\n{}\n\nUSER: swap something'},
+  {role:'assistant',content:[{type:'text',text:'Swapping.'},{type:'tool_use',id:'tX',name:'swap_exercise',input:{dayKey:'B',from:'KB Row',to:'Barbell Row'}}]}]}});});
+ await p.reload();await p.waitForSelector('body[data-ready="1"]');await p.click('.nav [data-nav="coach"]');await wt(400);
+ script=[{content:[{type:'text',text:'healed ok'}],stop_reason:'end_turn'}];
+ await p.fill('#coachInput','Hello?');await p.click('#coachSendBtn');await wt(600);
+ const hm=reqs[reqs.length-1].body.messages;
+ const ai=hm.findIndex(m=>m.role==='assistant'&&Array.isArray(m.content)&&m.content.some(c=>c.type==='tool_use'&&c.id==='tX'));
+ ok(ai>=0&&hm[ai+1]&&hm[ai+1].role==='user'&&Array.isArray(hm[ai+1].content)&&hm[ai+1].content.some(c=>c.type==='tool_result'&&c.tool_use_id==='tX'),'orphan tool_use gets a synthetic tool_result');
+ ok(hm[0].role==='user'&&typeof hm[0].content==='string','transcript starts on a plain user turn');
+ ok((await p.textContent('#coachChat')).includes('healed ok'),'chat works again after the bad state');
  // offline-only + own key → direct Anthropic call
  await p.route('https://api.anthropic.com/**',route=>{const body=route.request().postDataJSON();reqs.push({direct:true,body});route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({content:[{type:'text',text:'direct ok'}],stop_reason:'end_turn'})});});
  const ctx2=await b.newContext({viewport:{width:390,height:844},serviceWorkers:'block'});const p2=await ctx2.newPage();
