@@ -282,16 +282,46 @@ async function renderCoachTab(){
     <div class="xs muted" style="margin-top:8px">${coachAvailable()?'Ask the coach anything below — it sees your data and can change your plan (you approve every change).':navigator.onLine?'Sign in (Settings → Account) or add an API key to chat with the coach.':'Offline — chat unavailable; everything else works.'}</div></div>`;
   renderChat();
 }
+function chatBubble(m,ro){ // ro = read-only (archived chats: no Accept/Discard)
+  if(m.role==='user')return`<div class="msg me">${esc(m.text)}</div>`;
+  if(m.role==='assistant')return`<div class="msg ai${m.err?' err':''}">${mdLite(m.text)}</div>`;
+  if(m.status==='read')return`<div class="msg sys">${esc(m.text)}</div>`;
+  return`<div class="msg card tool ${m.status}"><div class="row between"><b>${m.title}</b><span class="badge">${m.status==='pending'?'Preview':m.status==='applied'?'✓ Applied':m.status==='declined'?'Discarded':'Failed'}</span></div>${m.html||''}${!ro&&m.status==='pending'?`<div class="btnrow" style="margin-top:10px"><button class="btn" data-coachok="${m.id}">Accept</button><button class="btn ghost" data-coachno="${m.id}">Discard</button></div>`:''}</div>`;
+}
 function renderChat(){
   const el=$('#coachChat');if(!el)return;
   const quick=['How am I doing this week?','What should I focus on today?','I ate something not on the plan','Swap an exercise for me','Rework my meal plan','Bought new equipment'];
-  el.innerHTML=(CHAT.length?CHAT.map(m=>{
-    if(m.role==='user')return`<div class="msg me">${esc(m.text)}</div>`;
-    if(m.role==='assistant')return`<div class="msg ai${m.err?' err':''}">${mdLite(m.text)}</div>`;
-    if(m.status==='read')return`<div class="msg sys">${esc(m.text)}</div>`;
-    return`<div class="msg card tool ${m.status}"><div class="row between"><b>${m.title}</b><span class="badge">${m.status==='pending'?'Preview':m.status==='applied'?'✓ Applied':m.status==='declined'?'Discarded':'Failed'}</span></div>${m.html||''}${m.status==='pending'?`<div class="btnrow" style="margin-top:10px"><button class="btn" data-coachok="${m.id}">Accept</button><button class="btn ghost" data-coachno="${m.id}">Discard</button></div>`:''}</div>`;
-  }).join(''):`<div class="empty" style="margin:8px 0">Try: ${quick.map(q=>`<button class="chip" data-coachq="${esc(q)}">${esc(q)}</button>`).join(' ')}</div>`)
+  el.innerHTML=(CHAT.length?CHAT.map(m=>chatBubble(m,false)).join(''):`<div class="empty" style="margin:8px 0">Try: ${quick.map(q=>`<button class="chip" data-coachq="${esc(q)}">${esc(q)}</button>`).join(' ')}</div>`)
   +(coachBusy&&!coachPending?'<div class="msg ai thinking">Thinking…</div>':'');
   const box=$('#view-coach');if(box&&CHAT.length)requestAnimationFrame(()=>window.scrollTo(0,document.body.scrollHeight));
 }
-async function coachClear(){if(!confirm('Clear this conversation? Your data and plan are untouched.'))return;CHAT=[];CHAT_API=[];await idbDel('kv','coachChat');renderChat();}
+
+/* ---------- chat archive (device-local, like the live chat) ---------- */
+/* ＋ New chat files the current conversation into kv coachArchive (visible
+   bubbles only — archived chats are read-only, so no API replay state) and
+   starts clean. Past chats = list → read-only viewer; delete lives there. */
+const COACH_ARCHIVE_MAX=15;
+async function coachNewChat(){
+  if(coachBusy)return; // includes a pending preview — decide that first
+  if(!CHAT.length){toast('Already a fresh chat');return;}
+  const first=CHAT.find(m=>m.role==='user');
+  const arc=(await idbGet('kv','coachArchive'))?.v||[];
+  arc.push({id:uid(),at:Date.now(),title:(first?first.text:'Conversation').slice(0,60),chat:CHAT.slice(-60)});
+  await idbPut('kv',{k:'coachArchive',v:arc.slice(-COACH_ARCHIVE_MAX)});
+  CHAT=[];CHAT_API=[];await idbDel('kv','coachChat');
+  renderChat();toast('Chat archived — fresh start');
+}
+async function coachArchiveModal(){
+  const arc=((await idbGet('kv','coachArchive'))?.v||[]).slice().reverse();
+  openModal(`<h3>Past chats</h3>${arc.length?arc.map(a=>`<div class="foodrow" data-arcview="${a.id}"><div><b>${esc(a.title)}</b><div class="xs muted">${niceDate(dstr(new Date(a.at)))} · ${a.chat.filter(m=>m.role==='user').length} message${a.chat.filter(m=>m.role==='user').length===1?'':'s'}</div></div><button class="btn ghost sm" data-arcdel="${a.id}" aria-label="Delete chat">🗑</button></div>`).join(''):`<div class="empty">Nothing here yet — <b>＋ New</b> files the current conversation here and starts fresh.</div>`}`);
+}
+async function coachArchiveView(id){
+  const arc=(await idbGet('kv','coachArchive'))?.v||[];const a=arc.find(x=>x.id===id);if(!a)return;
+  openModal(`<div class="row between" style="align-items:center"><h3 style="margin:0">${esc(a.title)}</h3><button class="pillbtn" data-arcback>‹ Back</button></div><div class="xs muted" style="margin-top:2px">${niceDate(dstr(new Date(a.at)))} · read-only</div><div class="chat" style="margin-top:10px">${a.chat.map(m=>chatBubble(m,true)).join('')}</div>`);
+}
+async function coachArchiveDelete(id){
+  if(!confirm('Delete this archived chat? This can’t be undone.'))return;
+  const arc=(await idbGet('kv','coachArchive'))?.v||[];
+  await idbPut('kv',{k:'coachArchive',v:arc.filter(x=>x.id!==id)});
+  coachArchiveModal();
+}

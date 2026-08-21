@@ -81,7 +81,11 @@ document.addEventListener('click',async e=>{
   const cq=t.closest('[data-coachq]');if(cq){go('coach');coachSend(cq.dataset.coachq);return;}
   const cok=t.closest('[data-coachok]');if(cok){coachDecide(cok.dataset.coachok,'accept');return;}
   const cno=t.closest('[data-coachno]');if(cno){coachDecide(cno.dataset.coachno,'decline');return;}
-  if(t.closest('#coachClearBtn')){coachClear();return;}
+  if(t.closest('#coachNewBtn')){coachNewChat();return;}
+  if(t.closest('#coachPastBtn')){coachArchiveModal();return;}
+  const ad=t.closest('[data-arcdel]');if(ad){coachArchiveDelete(ad.dataset.arcdel);return;}
+  const av=t.closest('[data-arcview]');if(av){coachArchiveView(av.dataset.arcview);return;}
+  if(t.closest('[data-arcback]')){coachArchiveModal();return;}
   const xh=t.closest('[data-exhist]');if(xh){renderExHist(xh.dataset.exhist);go('exhist');return;}
   const lp=t.closest('[data-libpat]');if(lp){libPattern=lp.dataset.libpat;renderLibrary();return;}
   const lg=t.closest('[data-libgo]');if(lg){libOpen=lg.dataset.libgo;libQ='';libPattern='';renderLibrary();const el=document.querySelector(`[data-libex="${CSS.escape(libOpen)}"]`);if(el)el.scrollIntoView({block:'center'});return;}

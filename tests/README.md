@@ -22,7 +22,7 @@ Then run any suite with `node tests/<name>.js` (exit code 0 = green).
 | targets-test.js | structured targets, circuits, editor | 24 |
 | library-test.js | exercise catalog integrity, per-side labels, library view | 29 |
 | train3-test.js | full-screen logger, PBs, exercise history, week card, flat CSS | 32 |
-| coach-test.js | coach chat, tools, preview/accept/discard, transports, orphan-tool_use healing | 39 |
+| coach-test.js | coach chat, tools, preview/accept/discard, transports, orphan-tool_use healing, new chat + archive | 48 |
 | onboard-test.js | onboarding, deterministic targets, AI plan generation + validation | 33 |
 | share-test.js | invites, sign-up gate, plan sharing, kit adaptation | 21 |
 | food-test.js | describe-to-log, recipes, offline fallback | 18 |

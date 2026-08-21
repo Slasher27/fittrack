@@ -348,7 +348,14 @@ preview card via `previewFor()` and the loop *pauses* on a promise until the
 user taps Accept (→ `apply()` → `tool_result` "applied…") or Discard (→
 `tool_result` "user declined…"). Tool inputs become structured targets through
 `toolExToProgEx()` (catalog-resolved names, per-side inferred). Transcript
-persists in kv `coachChat` (device-local). Transport (`coachRequest`): signed
+persists in kv `coachChat` (device-local). **＋ New** archives the current
+conversation (visible bubbles only, no API state) into kv `coachArchive`
+(device-local, last 15) and starts clean; **Past chats** lists the archive →
+read-only viewer (`chatBubble(m, readOnly)` renders tool cards without
+Accept/Discard); deleting an archived chat (with confirm) lives in that list.
+Only the last `CHAT_MAX_TURNS` (24) API messages are ever sent, and
+`sanitizeApi()` heals any orphaned `tool_use` (synthetic `tool_result`) before
+every request/persist — an interrupted loop must never 400 the transcript. Transport (`coachRequest`): signed
 in → `POST {project}/functions/v1/coach` with the session token; else own key
 → direct Anthropic call; else an explanatory error. The Edge Function pins
 `claude-opus-5`, adaptive thinking, effort medium, `fallbacks:'default'`,
