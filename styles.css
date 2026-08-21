@@ -501,7 +501,7 @@ body.session-mode .view{padding-bottom:40px}
 
 /* ---------- Coach chat ---------- */
 .chat{display:flex;flex-direction:column;gap:8px;padding-bottom:70px}
-.msg{max-width:88%;padding:10px 12px;border-radius:14px;font-size:14.5px;line-height:1.4}
+.msg{max-width:88%;min-width:0;padding:10px 12px;border-radius:14px;font-size:14.5px;line-height:1.4;word-break:break-word;overflow-wrap:anywhere}
 .msg.me{align-self:flex-end;background:var(--volt);color:var(--volt-ink);border-bottom-right-radius:4px}
 .msg.ai{align-self:flex-start;background:var(--card);border:1px solid var(--line);border-bottom-left-radius:4px}
 .msg.ai p{margin:0 0 6px}.msg.ai p:last-child{margin:0}

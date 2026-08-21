@@ -78,6 +78,7 @@ function nextScripted(){return script.length?script.shift():{content:[{type:'tex
  script=[{status:429,error:'Daily coach limit reached (60).'}];
  await p.fill('#coachInput','hi');await p.click('#coachSendBtn');await wt(500);
  ok((await p.textContent('#coachChat .msg.err')).includes('Daily coach limit'),'server error surfaced in chat');
+ ok(await p.evaluate(()=>{CHAT.push({role:'assistant',err:true,ts:Date.now(),text:'⚠️ 400 {"type":"error","error":{"type":"invalid_request_error","message":"messages.18: tool_use ids were found without tool_result blocks immediately after: toolu_01B5bVEfZgwQAiyShDrWNCrb"},"request_id":"req_011CeFQskNyonKzr3E8nin"}'});renderChat();const w=document.documentElement.scrollWidth<=window.innerWidth;CHAT.pop();renderChat();return w;}),'long unbroken error text wraps — no horizontal scroll at 390px');
  await p.reload();await p.waitForSelector('body[data-ready="1"]');await p.click('.nav [data-nav="coach"]');await wt(400);
  ok((await p.textContent('#coachChat')).includes('KB Row is in Day B'),'conversation persisted across reload');
  console.log('H. orphaned tool_use in saved transcript is healed');
