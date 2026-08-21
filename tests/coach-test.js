@@ -95,6 +95,7 @@ function nextScripted(){return script.length?script.shift():{content:[{type:'tex
  ok((await p.textContent('#coachChat')).includes('healed ok'),'chat works again after the bad state');
  console.log('I. new chat + archive');
  p.on('dialog',d=>d.accept());
+ ok(await p.evaluate(()=>{window.scrollTo(0,document.body.scrollHeight);const r=document.getElementById('coachNewBtn').getBoundingClientRect();return r.top>=0&&r.bottom<=window.innerHeight;}),'＋ New stays visible when scrolled to the bottom of the chat');
  await p.click('#coachNewBtn');await wt(300);
  ok(await p.$('#coachChat [data-coachq]'),'new chat → clean slate with quick prompts');
  ok(await p.evaluate(async()=>{const a=(await idbGet('kv','coachArchive'))?.v||[];return a.length===1&&a[0].title.length>0&&a[0].chat.some(m=>m.role==='assistant');}),'old conversation filed in the archive with a title');

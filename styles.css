@@ -500,6 +500,9 @@ body.session-mode .view{padding-bottom:40px}
 .kpis .kpi .l{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:700;margin-top:4px}
 
 /* ---------- Coach chat ---------- */
+/* pinned under the sticky app header so ＋ New / Past chats stay reachable
+   while scrolled to the bottom of a long chat (59px = app-header height) */
+.coach-head{position:sticky;top:calc(59px + env(safe-area-inset-top));z-index:15;align-items:center;background:var(--bg);margin:0 -16px;padding:6px 16px 8px;border-bottom:1px solid var(--line)}
 .chat{display:flex;flex-direction:column;gap:8px;padding-bottom:70px}
 .msg{max-width:88%;min-width:0;padding:10px 12px;border-radius:14px;font-size:14.5px;line-height:1.4;word-break:break-word;overflow-wrap:anywhere}
 .msg.me{align-self:flex-end;background:var(--volt);color:var(--volt-ink);border-bottom-right-radius:4px}
